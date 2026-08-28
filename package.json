@@ -1,0 +1,28 @@
+{
+  "name": "ip26-intercom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web-based Push-to-Talk intercom untuk komunikasi tim produksi event IP26 UKK UNNES — berjalan di WiFi unnes-id via TURN, no app install, browser HP only.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "ptt",
+    "intercom",
+    "webrtc",
+    "live-production",
+    "broadcast",
+    "ip26",
+    "unnes"
+  ],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  }
+}

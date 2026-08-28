@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#121212" />
+  <meta name="description" content="Live intercom Push-to-Talk untuk kru produksi IP26." />
+  <title>intercom IP26 — Live</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎙️%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="intercom-body">
+
+  <header class="intercom-header">
+    <div class="me">
+      <span class="my-role" id="myRole">—</span>
+      <span class="my-name" id="myName">—</span>
+    </div>
+    <div class="conn-status" id="connStatus" data-state="connecting">
+      <span class="dot"></span>
+      <span class="label">Menghubungkan...</span>
+    </div>
+    <a href="index.html" class="btn-leave" id="leaveBtn" title="Keluar intercom">
+      <span aria-hidden="true">⎋</span>
+    </a>
+  </header>
+
+  <main class="intercom-main">
+
+    <section class="speaker-stage" aria-live="polite">
+      <div class="speaker-empty" id="speakerEmpty">
+        <div class="mic-icon" aria-hidden="true">🎙️</div>
+        <p>Belum ada yang bicara</p>
+        <small>Tahan tombol di bawah untuk transmisi</small>
+      </div>
+
+      <div class="speaker-active hidden" id="speakerActive">
+        <div class="speaker-pulse" aria-hidden="true"></div>
+        <div class="speaker-pulse ring" aria-hidden="true"></div>
+        <div class="speaker-info">
+          <div class="speaker-role" id="speakerRole">—</div>
+          <div class="speaker-name" id="speakerName">—</div>
+          <div class="speaker-label">SEDANG BICARA</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ptt-section">
+      <button id="pttButton" class="ptt-button" type="button" aria-label="Tahan untuk bicara">
+        <div class="ptt-ring" aria-hidden="true"></div>
+        <div class="ptt-inner">
+          <div class="ptt-icon" aria-hidden="true">📻</div>
+          <div class="ptt-label">Tahan Untuk Bicara</div>
+          <div class="ptt-hint">Tekan &amp; Tahan</div>
+        </div>
+      </button>
+      <div class="ptt-status" id="pttStatus" aria-live="polite">Siap</div>
+    </section>
+
+    <section class="crew-panel">
+      <header class="crew-head">
+        <h3>Kru Online</h3>
+        <span class="crew-count" id="crewCount">0</span>
+      </header>
+      <ul class="crew-list" id="crewList" aria-live="polite">
+        <li class="crew-empty">Belum ada kru lain yang join.</li>
+      </ul>
+    </section>
+
+  </main>
+
+  <audio id="remoteAudio" autoplay></audio>
+
+  <div class="toast-stack" id="toastStack" aria-live="assertive"></div>
+
+  <script src="intercom.js"></script>
+</body>
+</html>

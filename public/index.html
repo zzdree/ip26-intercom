@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#121212" />
+  <meta name="description" content="intercom Push-to-Talk untuk tim produksi event Ibadah Perdana UKK UNNES 2026." />
+  <title>intercom IP26 — Masuk</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%99%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="join-body">
+
+  <main class="container narrow">
+
+    <header class="join-hero">
+      <div class="logo-mark" aria-hidden="true">🎙️</div>
+      <h1>intercom IP26</h1>
+      <p class="tagline">Push-to-Talk untuk Kru Produksi<br/>Ibadah Perdana UKK UNNES 2026 — via WiFi unnes-id</p>
+    </header>
+
+    <section class="card">
+      <header class="card-head">
+        <span class="step">1</span>
+        <h2>Identitas Kru</h2>
+      </header>
+
+      <form id="joinForm" class="form" autocomplete="off">
+
+        <div class="field">
+          <label for="name">Nama Panggilan</label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            required
+            maxlength="20"
+            placeholder="cth: Alex"
+            inputmode="text"
+            autocapitalize="words"
+          />
+          <small class="hint">Maks. 20 karakter. Hanya untuk ditampilkan.</small>
+        </div>
+
+        <div class="field">
+          <label>Peran di Produksi</label>
+          <div class="role-grid" role="radiogroup" aria-label="Pilih peran">
+            <label class="role-chip">
+              <input type="radio" name="role" value="cam1" />
+              <div class="role-icon">📷</div>
+              <div class="role-label">CAM 1</div>
+              <div class="role-sub">Wide / Master</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="cam2" />
+              <div class="role-icon">📷</div>
+              <div class="role-label">CAM 2</div>
+              <div class="role-sub">Medium / Stage</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="cam3" />
+              <div class="role-icon">📷</div>
+              <div class="role-label">CAM 3</div>
+              <div class="role-sub">Tight / Close</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="cam4" />
+              <div class="role-icon">📷</div>
+              <div class="role-label">CAM 4</div>
+              <div class="role-sub">Roving</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="switcher" />
+              <div class="role-icon">🎬</div>
+              <div class="role-label">Switcher</div>
+              <div class="role-sub">Video Master</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="production" />
+              <div class="role-icon">👑</div>
+              <div class="role-label">Produksi</div>
+              <div class="role-sub">Lead / Komando</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="ppt1" />
+              <div class="role-icon">🎤</div>
+              <div class="role-label">ProPresenter 1</div>
+              <div class="role-sub">Side &amp; Back LED</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="ppt2" />
+              <div class="role-icon">🎤</div>
+              <div class="role-label">ProPresenter 2</div>
+              <div class="role-sub">Center Lyrics</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="audio" />
+              <div class="role-icon">🔊</div>
+              <div class="role-label">Audio FOH</div>
+              <div class="role-sub">Yamaha QL5</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="timekeeper" />
+              <div class="role-icon">⏱️</div>
+              <div class="role-label">Time Keeper</div>
+              <div class="role-sub">Run-down</div>
+            </label>
+            <label class="role-chip">
+              <input type="radio" name="role" value="other" />
+              <div class="role-icon">🛠️</div>
+              <div class="role-label">Lainnya</div>
+              <div class="role-sub">—</div>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary">
+          <span>Masuk intercom</span>
+          <span class="arrow" aria-hidden="true">→</span>
+        </button>
+      </form>
+    </section>
+
+    <section class="card info">
+      <header class="card-head">
+        <span class="step">2</span>
+        <h2>Sebelum Mulai</h2>
+      </header>
+      <ul class="tips">
+        <li>
+          <span class="tip-icon">🎧</span>
+          <div>
+            <strong>Pakai earphone / headset.</strong>
+            <small>Wajib, supaya tidak ada feedback antara speaker &amp; mic HP.</small>
+          </div>
+        </li>
+        <li>
+          <span class="tip-icon">📡</span>
+          <div>
+            <strong>WiFi: <em>unnes-id</em> — HP sudah konek WiFi kampus.</strong>
+            <small>Audio lewat TURN server (global.turn.metered.ca) — client isolation WiFi kampus bukan masalah.</small>
+          </div>
+        </li>
+        <li>
+          <span class="tip-icon">🎤</span>
+          <div>
+            <strong>Izinkan akses mikrofon</strong> saat browser meminta.
+            <small>Chrome / Safari akan menampilkan popup izin di pertama kali.</small>
+          </div>
+        </li>
+        <li>
+          <span class="tip-icon">🔋</span>
+          <div>
+            <strong>Charge HP penuh</strong> &amp; aktifkan mode hemat baterai longgar.
+            <small>Push-to-talk membuat browser tetap aktif — butuh daya.</small>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <footer class="join-footer">
+      <p>intercom IP26 v1.0 · Self-hosted WebRTC mesh</p>
+      <p class="status-line" id="serverStatus">Memeriksa server...</p>
+    </footer>
+
+  </main>
+
+  <script src="join.js"></script>
+</body>
+</html>
