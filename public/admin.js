@@ -1,6 +1,6 @@
 /* eslint-disable */
 /**
- * intercom IP26 — Admin Dashboard
+ * IP26-Intercom — Admin Dashboard
  * ------------------------------------------------------------------
  * WebSocket sebagai observer: terima broadcast presence + PTT state
  * dari server. Tidak perlu register karena admin = listener only.

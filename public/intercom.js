@@ -1,5 +1,5 @@
 /**
- * intercom IP26 — Main intercom page logic
+ * IP26-Intercom — Main intercom page logic
  * -----------------------------------------------------------------------------
  * Handles:
  *  - WebSocket signaling for presence + PTT state + WebRTC negotiation
@@ -9,14 +9,19 @@
  *      • MUTE — tap to toggle mic on/off (latch)
  *  - Audio routing (play remote streams through single <audio> element)
  *  - UI updates: speaker stage, crew list, connection status, toasts
+ *  - Lifecycle safety: visibilitychange, pagehide, freeze, idle-timeout
  *
  * Audio flow:
- *   Local mic (getUserMedia) → tx-controlled track.enabled
+ *   Local mic (getUserMedia on page load) → tx-controlled track.enabled
  *   → RTCPeerConnection tracks → remote peers hear us when our track is enabled
  *   ← RTCPeerConnection ontrack → <audio> element
  *
  * Important:
- *   - We never enable the local mic track until the user triggers PTT/mute-on
+ *   - Mic is acquired ONCE on page load (after identity check) so the browser
+ *     permission prompt appears immediately, not buried behind a button press.
+ *   - Wake lock is requested immediately on page load and re-acquired when the
+ *     tab becomes visible again — this prevents the screen from sleeping while
+ *     a kru is holding the device for production use.
  *   - All peers are full-mesh, works for ≤ 8-10 simultaneous users fine
  * -----------------------------------------------------------------------------
  */
@@ -32,6 +37,8 @@
   let ws = null;
   let localStream = null;
   let localAudioTrack = null;
+  let localMicReady = false;     // apakah user sudah kasih izin mic
+  let localMicError = null;      // kenapa izin ditolak / gagal
 
   // Map<peerId, { pc, role, name }>
   const peers = new Map();
@@ -40,6 +47,11 @@
   // Transmission state — single source of truth
   let txActive = false;              // are we currently sending audio?
   let txMode = 'ptt';                // 'ptt' (hold) or 'mute' (toggle)
+
+  // Idle safety: if mic stays on this long without a re-confirm, auto-mute
+  const IDLE_MUTE_MS = 60_000;       // 60s
+  let idleMuteTimer = null;
+  let lastTxActivityAt = 0;
 
   let reconnectAttempts = 0;
   const MAX_RECONNECT_DELAY = 15000;
@@ -90,7 +102,7 @@
   // INIT
   // ============================================================================
 
-  function init() {
+  async function init() {
     // Restore identity from sessionStorage (set by join.html)
     try {
       const cached = sessionStorage.getItem('intercom-identity');
@@ -121,14 +133,339 @@
     setupModeSelector();
     setupPTT();
     setupMute();
+    setupAudioUnlock();
 
     // Start in selected mode (silent = no toast)
     applyMode(txMode, true);
 
-    // Page Visibility: kalau user pindah tab saat PTT, lepas transmisi
+    // ========================================================================
+    // PERMISSION PROMPT: ask for mic immediately on page load.
+    // Browser rules require a user gesture for getUserMedia. We work around
+    // this by:
+    //   1. Adding a transparent "Tap untuk masuk" gate button that fires on
+    //      first user interaction (any click/tap counts)
+    //   2. As soon as that fires, request mic and connect WS
+    // If the page is already inside a "warm" tap (e.g. user just hit "Masuk"
+    // on join.html), we go straight in.
+    // ========================================================================
+
+    const warmed = sessionStorage.getItem('intercom-warmed') === '1';
+    if (warmed) {
+      sessionStorage.removeItem('intercom-warmed');
+      enterRoom();
+    } else {
+      showEnterGate();
+    }
+
+    // ========================================================================
+    // LIFECYCLE SAFETY
+    // ========================================================================
+
+    // Page Visibility: kalau user pindah tab saat PTT (mode PTT), lepas transmisi
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && txActive && txMode === 'ptt') stopTx();
+      if (document.hidden) {
+        // PTT mode: selalu aman dilepas
+        if (txActive && txMode === 'ptt') stopTx('visibility');
+        // Re-acquire wake lock when we come back
+      } else {
+        acquireWakeLock();
+      }
     });
+
+    // HP locked / app frozen / tab di-swap
+    window.addEventListener('pagehide', () => {
+      if (txActive) stopTx('pagehide');
+    });
+    window.addEventListener('freeze', () => {
+      if (txActive) stopTx('freeze');
+    });
+    window.addEventListener('blur', () => {
+      // PTT mode: lepas transmisi kalau kehilangan fokus
+      if (txActive && txMode === 'ptt') stopTx('blur');
+    });
+
+    // Idle safety: kalau mic on > 60s tanpa aktivitas, auto-mute (safety net
+    // kalau HP jatuh ke saku / kru lupa matikan)
+    setInterval(checkIdleMute, 5_000);
+
+    // Re-acquire wake lock if it gets released (battery saver, tab switch, etc.)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && !wakeLock) acquireWakeLock();
+    });
+  }
+
+  // ============================================================================
+  // ENTER GATE — one tap to request mic + open WS
+  // ============================================================================
+
+  function showEnterGate() {
+    // Hide the PTT/Mute buttons, show a "Masuk" button that primes everything
+    dom.pttButton.classList.add('hidden');
+    dom.muteButton.classList.add('hidden');
+    dom.pttStatus.textContent = 'Tekan tombol di bawah untuk masuk';
+
+    const gate = document.createElement('button');
+    gate.id = 'enterGate';
+    gate.className = 'ptt-button ptt-mode ptt-color-ptt';
+    gate.style.minHeight = '120px';
+    gate.innerHTML = `
+      <div class="ptt-inner">
+        <div class="ptt-icon" aria-hidden="true">🎙️</div>
+        <div class="ptt-label">MASUK INTERCOM</div>
+        <div class="ptt-hint">Aktifkan mikrofon &amp; speaker</div>
+      </div>
+    `;
+    gate.setAttribute('aria-label', 'Tekan untuk masuk intercom dan mengaktifkan mikrofon');
+
+    // Insert before the status text
+    dom.pttStatus.parentNode.insertBefore(gate, dom.pttStatus);
+
+    const onEnter = async () => {
+      gate.removeEventListener('click', onEnter);
+      gate.removeEventListener('touchend', onEnter);
+      gate.disabled = true;
+      gate.querySelector('.ptt-label').textContent = 'MEMBUKA...';
+      gate.querySelector('.ptt-hint').textContent = 'Minta izin mikrofon...';
+      try {
+        await enterRoom();
+        gate.remove();
+        // After enter, show the active mode's button
+        if (txMode === 'ptt') dom.pttButton.classList.remove('hidden');
+        else dom.muteButton.classList.remove('hidden');
+        dom.pttStatus.textContent = 'Siap · Mode ' + (txMode === 'ptt' ? 'PTT' : 'Mute');
+      } catch (e) {
+        gate.disabled = false;
+        gate.querySelector('.ptt-label').textContent = 'COBA LAGI';
+        gate.querySelector('.ptt-hint').textContent = (e && e.message) || 'Izin ditolak, periksa pengaturan';
+      }
+    };
+
+    gate.addEventListener('click', onEnter);
+    gate.addEventListener('touchend', onEnter, { passive: false });
+  }
+
+  async function enterRoom() {
+    // 1) Minta izin mic SEKALIGUS (bukan pas pencet PTT)
+    await ensureLocalMic();
+
+    // 2) Buka WS
+    connectWebSocket();
+
+    // 3) Wake lock supaya HP gak tidur pas live
+    acquireWakeLock();
+
+    // 4) Setup audio device picker (kalau browser support enumerateDevices)
+    setupAudioDevices();
+
+    // 5) Pilih output device default (kalau browser support setSinkId)
+    setupOutputDevice();
+
+    // 6) Mark warmed for next visit
+    try { sessionStorage.setItem('intercom-warmed', '1'); } catch (e) {}
+  }
+
+  // ============================================================================
+  // LOCAL MIC ACQUISITION
+  // ============================================================================
+
+  async function ensureLocalMic() {
+    if (localMicReady && localStream) return localStream;
+
+    // Pick best available audio constraints
+    const constraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 48000,
+        channelCount: 1
+      },
+      video: false
+    };
+
+    // If user previously picked a specific input device, use it
+    try {
+      const savedInputId = localStorage.getItem('intercom-input-device');
+      if (savedInputId) {
+        constraints.audio.deviceId = { exact: savedInputId };
+      }
+    } catch (e) { /* ignore */ }
+
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      localAudioTrack = localStream.getAudioTracks()[0];
+      localAudioTrack.enabled = false; // MUTED by default
+      localMicReady = true;
+      localMicError = null;
+
+      // Add to any existing peer connections
+      for (const [, peerEntry] of peers) {
+        const sender = peerEntry.pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (sender) {
+          sender.replaceTrack(localAudioTrack).catch(() => {});
+        } else {
+          peerEntry.pc.addTrack(localAudioTrack, localStream);
+        }
+      }
+
+      console.log('[mic] local mic acquired:', localAudioTrack.label);
+      return localStream;
+    } catch (err) {
+      localMicError = err;
+      console.error('[mic] getUserMedia failed:', err);
+
+      let msg = 'Izin mikrofon ditolak.';
+      if (err && err.name === 'NotAllowedError') {
+        msg = 'Izin mikrofon ditolak. Buka Setelan → Situs → Mikrofon untuk mengizinkan.';
+      } else if (err && err.name === 'NotFoundError') {
+        msg = 'Tidak ada mikrofon ditemukan. Sambungkan headset/IEM.';
+      } else if (err && err.name === 'NotReadableError') {
+        msg = 'Mikrofon sedang dipakai aplikasi lain. Tutup dulu.';
+      }
+      toast(msg, 'error', 6000);
+      throw err;
+    }
+  }
+
+  // ============================================================================
+  // AUDIO DEVICE PICKER (input & output)
+  // ============================================================================
+
+  let audioDeviceSelector = null;
+
+  function setupAudioDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      const inputs = devices.filter(d => d.kind === 'audioinput');
+      const outputs = devices.filter(d => d.kind === 'audiooutput');
+
+      // Append a small device picker UI to the crew panel header
+      const crewHead = document.querySelector('.crew-head');
+      if (!crewHead || audioDeviceSelector) return;
+
+      audioDeviceSelector = document.createElement('div');
+      audioDeviceSelector.className = 'device-picker';
+      audioDeviceSelector.innerHTML = `
+        <div class="device-row">
+          <label for="inputDevice">🎙️ Mic</label>
+          <select id="inputDevice" aria-label="Pilih mikrofon"></select>
+        </div>
+        ${('setSinkId' in HTMLMediaElement.prototype) ? `
+        <div class="device-row">
+          <label for="outputDevice">🔊 Speaker</label>
+          <select id="outputDevice" aria-label="Pilih speaker"></select>
+        </div>
+        ` : ''}
+      `;
+      crewHead.parentNode.insertBefore(audioDeviceSelector, crewHead.nextSibling);
+
+      const inputSel = audioDeviceSelector.querySelector('#inputDevice');
+      const outputSel = audioDeviceSelector.querySelector('#outputDevice');
+
+      // Populate input
+      inputs.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId;
+        opt.textContent = d.label || `Mic (${d.deviceId.slice(0, 6)})`;
+        if (localAudioTrack && d.deviceId === localAudioTrack.getSettings().deviceId) {
+          opt.selected = true;
+        }
+        inputSel.appendChild(opt);
+      });
+      // Also add "default" option
+      const defOpt = document.createElement('option');
+      defOpt.value = '';
+      defOpt.textContent = '— Default —';
+      inputSel.insertBefore(defOpt, inputSel.firstChild);
+
+      inputSel.addEventListener('change', async () => {
+        const newId = inputSel.value;
+        try {
+          if (newId) {
+            localStorage.setItem('intercom-input-device', newId);
+          } else {
+            localStorage.removeItem('intercom-input-device');
+          }
+          // Re-acquire mic with new device
+          if (localStream) {
+            localStream.getTracks().forEach(t => t.stop());
+            localStream = null;
+            localAudioTrack = null;
+            localMicReady = false;
+          }
+          await ensureLocalMic();
+          toast('Mikrofon diganti: ' + (inputSel.options[inputSel.selectedIndex].textContent), 'info', 2000);
+        } catch (e) {
+          toast('Gagal ganti mikrofon', 'error');
+        }
+      });
+
+      // Populate output (only if setSinkId supported)
+      if (outputSel) {
+        outputs.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.deviceId;
+          opt.textContent = d.label || `Speaker (${d.deviceId.slice(0, 6)})`;
+          outputSel.appendChild(opt);
+        });
+        const defOut = document.createElement('option');
+        defOut.value = '';
+        defOut.textContent = '— Default —';
+        outputSel.insertBefore(defOut, outputSel.firstChild);
+
+        outputSel.addEventListener('change', () => {
+          const newId = outputSel.value;
+          if (newId && dom.remoteAudio.setSinkId) {
+            dom.remoteAudio.setSinkId(newId).then(() => {
+              localStorage.setItem('intercom-output-device', newId);
+              toast('Speaker diganti: ' + (outputSel.options[outputSel.selectedIndex].textContent), 'info', 2000);
+            }).catch(err => {
+              console.error('[audio] setSinkId failed:', err);
+              toast('Gagal ganti speaker', 'error');
+            });
+          } else {
+            localStorage.removeItem('intercom-output-device');
+          }
+        });
+      }
+
+      // Watch for hot-plug (kru colok IEM / TWS di tengah acara)
+      navigator.mediaDevices.addEventListener('devicechange', async () => {
+        const fresh = await navigator.mediaDevices.enumerateDevices();
+        const newInputs = fresh.filter(d => d.kind === 'audioinput');
+        const newOutputs = fresh.filter(d => d.kind === 'audiooutput');
+        if (newInputs.length !== inputs.length || newOutputs.length !== outputs.length) {
+          toast('Perangkat audio berubah — refresh halaman jika perlu', 'info', 3500);
+        }
+      });
+    }).catch(err => {
+      console.warn('[audio] enumerateDevices failed:', err);
+    });
+  }
+
+  function setupOutputDevice() {
+    if (!('setSinkId' in HTMLMediaElement.prototype)) return;
+    try {
+      const savedOutputId = localStorage.getItem('intercom-output-device');
+      if (savedOutputId) {
+        dom.remoteAudio.setSinkId(savedOutputId).catch(() => {});
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function setupAudioUnlock() {
+    // Some browsers (iOS Safari especially) require a user gesture before
+    // audio output is allowed to play. We unlock on first interaction.
+    const unlock = () => {
+      if (dom.remoteAudio) {
+        dom.remoteAudio.play().catch(() => {});
+      }
+      document.removeEventListener('touchstart', unlock);
+      document.removeEventListener('click', unlock);
+    };
+    document.addEventListener('touchstart', unlock, { once: true, passive: true });
+    document.addEventListener('click', unlock, { once: true });
   }
 
   // ============================================================================
@@ -144,7 +481,7 @@
     if (mode !== 'ptt' && mode !== 'mute') return;
 
     // If currently transmitting, stop first
-    if (txActive) stopTx();
+    if (txActive) stopTx('modechange');
 
     txMode = mode;
 
@@ -155,12 +492,16 @@
     dom.modePttBtn.setAttribute('aria-selected', isPtt ? 'true' : 'false');
     dom.modeMuteBtn.setAttribute('aria-selected', !isPtt ? 'true' : 'false');
 
-    // Toggle which big button is visible
-    dom.pttButton.classList.toggle('hidden', !isPtt);
-    dom.muteButton.classList.toggle('hidden', isPtt);
+    // Toggle which big button is visible (skip if enter gate is showing)
+    if (!document.getElementById('enterGate')) {
+      dom.pttButton.classList.toggle('hidden', !isPtt);
+      dom.muteButton.classList.toggle('hidden', isPtt);
+    }
 
     // Update status text
-    dom.pttStatus.textContent = isPtt ? 'Siap · Mode PTT' : 'Siap · Mode Mute';
+    if (localMicReady) {
+      dom.pttStatus.textContent = isPtt ? 'Siap · Mode PTT' : 'Siap · Mode Mute';
+    }
     dom.pttStatus.classList.remove('transmitting');
 
     // Persist preference for next session
@@ -177,13 +518,13 @@
     const pressStart = (e) => {
       e.preventDefault();
       if (txActive) return;
-      startTx();
+      startTx('ptt-press');
     };
 
     const pressEnd = (e) => {
       e.preventDefault();
       if (!txActive) return;
-      stopTx();
+      stopTx('ptt-release');
     };
 
     // Touch events (mobile)
@@ -195,29 +536,6 @@
     btn.addEventListener('mousedown', pressStart);
     btn.addEventListener('mouseup', pressEnd);
     btn.addEventListener('mouseleave', pressEnd);
-
-    // Keyboard: hold space to talk (handy for testing on laptop)
-    document.addEventListener('keydown', (e) => {
-      if (txMode !== 'ptt') return;
-      if (e.code === 'Space' && !e.repeat && !txActive &&
-          document.activeElement?.tagName !== 'INPUT' &&
-          document.activeElement?.tagName !== 'TEXTAREA') {
-        e.preventDefault();
-        startTx();
-      }
-    });
-    document.addEventListener('keyup', (e) => {
-      if (txMode !== 'ptt') return;
-      if (e.code === 'Space' && txActive) {
-        e.preventDefault();
-        stopTx();
-      }
-    });
-
-    // Global safety: if we lose focus while transmitting, stop
-    window.addEventListener('blur', () => {
-      if (txActive && txMode === 'ptt') stopTx();
-    });
   }
 
   // ============================================================================
@@ -230,20 +548,19 @@
     const toggle = (e) => {
       e.preventDefault();
       if (txActive) {
-        stopTx();
+        stopTx('mute-toggle');
       } else {
-        startTx();
+        startTx('mute-toggle');
       }
     };
 
     btn.addEventListener('click', toggle);
-    // Use touchend for snappier mobile feel; click is fallback
     btn.addEventListener('touchend', (e) => {
       e.preventDefault();
       if (txActive) {
-        stopTx();
+        stopTx('mute-toggle');
       } else {
-        startTx();
+        startTx('mute-toggle');
       }
     }, { passive: false });
   }
@@ -252,43 +569,23 @@
   // UNIFIED TX START/STOP (used by both PTT and Mute)
   // ============================================================================
 
-  async function startTx() {
+  async function startTx(reason) {
     if (txActive) return;
 
-    // First-time: get mic
-    if (!localStream) {
+    // Make sure mic is acquired. If not (e.g. user skipped the gate somehow),
+    // try once more.
+    if (!localMicReady) {
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            sampleRate: 48000,
-            channelCount: 1
-          },
-          video: false
-        });
-        localAudioTrack = localStream.getAudioTracks()[0];
-        localAudioTrack.enabled = false; // MUTED by default
-
-        // Add to existing peer connections
-        for (const [, peerEntry] of peers) {
-          const sender = peerEntry.pc.getSenders().find(s => s.track && s.track.kind === 'audio');
-          if (sender) {
-            sender.replaceTrack(localAudioTrack).catch(() => {});
-          } else {
-            peerEntry.pc.addTrack(localAudioTrack, localStream);
-          }
-        }
-      } catch (err) {
-        console.error('[mic] getUserMedia failed:', err);
-        toast('Izin mikrofon ditolak. Periksa pengaturan browser.', 'error', 5000);
-        return;
+        await ensureLocalMic();
+      } catch (e) {
+        return; // toast already shown
       }
     }
 
     txActive = true;
     if (localAudioTrack) localAudioTrack.enabled = true;
+    lastTxActivityAt = Date.now();
+    scheduleIdleMute();
 
     // Update UI for both buttons (only the visible one is rendered)
     if (txMode === 'ptt') {
@@ -297,8 +594,8 @@
       dom.pttHint.textContent = 'Lepaskan untuk selesai';
     } else {
       dom.muteButton.classList.add('active');
-      dom.muteLabel.textContent = 'MIC OFF';
-      dom.muteHint.textContent = 'Tap untuk matikan / nyalakan';
+      dom.muteLabel.textContent = 'MIC ON';
+      dom.muteHint.textContent = 'Tap untuk matikan';
     }
 
     dom.pttStatus.textContent = '● Mengirim...';
@@ -318,14 +615,15 @@
     // Haptic feedback on mobile
     if (navigator.vibrate) navigator.vibrate(40);
 
-    // Lock orientation / wake
+    // Re-acquire wake lock in case it was released
     acquireWakeLock();
   }
 
-  function stopTx() {
+  function stopTx(reason) {
     if (!txActive) return;
     txActive = false;
     if (localAudioTrack) localAudioTrack.enabled = false;
+    clearIdleMute();
 
     // Reset both button UIs (only the visible one matters)
     dom.pttButton.classList.remove('active');
@@ -336,7 +634,11 @@
     dom.muteLabel.textContent = 'MIC ON';
     dom.muteHint.textContent = 'Tap untuk matikan';
 
-    dom.pttStatus.textContent = txMode === 'ptt' ? 'Siap · Mode PTT' : 'Siap · Mode Mute';
+    if (localMicReady) {
+      dom.pttStatus.textContent = txMode === 'ptt' ? 'Siap · Mode PTT' : 'Siap · Mode Mute';
+    } else {
+      dom.pttStatus.textContent = 'Tekan "MASUK INTERCOM" dulu';
+    }
     dom.pttStatus.classList.remove('transmitting');
 
     // Clear our own speaking display
@@ -345,8 +647,39 @@
     // Notify server
     sendSignaling({ type: 'ptt-off' });
 
-    // Release wake lock if we have one
-    releaseWakeLock();
+    if (reason && reason !== 'ptt-release' && reason !== 'mute-toggle') {
+      console.log('[tx] stopped due to:', reason);
+    }
+  }
+
+  // ============================================================================
+  // IDLE SAFETY
+  // ============================================================================
+
+  function scheduleIdleMute() {
+    clearIdleMute();
+    if (txMode !== 'mute') return; // only worry about Mute Toggle (latched)
+    idleMuteTimer = setTimeout(() => {
+      if (txActive) {
+        stopTx('idle-timeout');
+        toast('Mic auto-mute setelah 60 detik. Tap lagi untuk menyalakan.', 'warn', 5000);
+      }
+    }, IDLE_MUTE_MS);
+  }
+
+  function clearIdleMute() {
+    if (idleMuteTimer) {
+      clearTimeout(idleMuteTimer);
+      idleMuteTimer = null;
+    }
+  }
+
+  function checkIdleMute() {
+    // Double-check safety net
+    if (txActive && txMode === 'mute' && Date.now() - lastTxActivityAt > IDLE_MUTE_MS) {
+      stopTx('idle-check');
+      toast('Mic auto-mute (60s safety). Tap lagi untuk menyalakan.', 'warn', 5000);
+    }
   }
 
   // ============================================================================
@@ -374,16 +707,6 @@
   function clearSpeakerIfSelf() {
     dom.speakerEmpty.classList.remove('hidden');
     dom.speakerActive.classList.add('hidden');
-  }
-
-  let lastSpeakingId = null;
-  function markPeerSpeaking(peerId, speaking) {
-    lastSpeakingId = speaking ? peerId : null;
-    renderCrewList(getCurrentCrew());
-  }
-
-  function getCurrentCrew() {
-    return lastPresenceUsers || [];
   }
 
   let lastPresenceUsers = [];
@@ -462,17 +785,15 @@
   async function acquireWakeLock() {
     try {
       if ('wakeLock' in navigator) {
+        // Release any existing lock first
+        if (wakeLock) {
+          try { await wakeLock.release(); } catch (e) {}
+          wakeLock = null;
+        }
         wakeLock = await navigator.wakeLock.request('screen');
       }
     } catch (err) {
-      // Wake lock may be denied — that's OK
-    }
-  }
-
-  function releaseWakeLock() {
-    if (wakeLock) {
-      wakeLock.release().catch(() => {});
-      wakeLock = null;
+      // Wake lock may be denied (battery saver, etc.) — that's OK
     }
   }
 
@@ -561,11 +882,6 @@
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      // NOTE: TURN credentials below are placeholders for the demo.
-      // For real cross-network use, register at https://www.metered.ca/stun-turn
-      // and replace with real credentials. On the same LAN (e.g. unnes-id,
-      // WiFi kos, hotspot), STUN alone is enough — TURN only needed if
-      // client isolation blocks direct peer-to-peer traffic.
       {
         urls: 'turn:global.turn.metered.ca:80',
         username: 'e7f3a4b2c1d9e8f6a5b4c3d2e1f0a9b8',
@@ -614,6 +930,8 @@
         if (dom.remoteAudio.srcObject !== stream) {
           dom.remoteAudio.srcObject = stream;
         }
+        // Some browsers need an explicit play() call after src change
+        dom.remoteAudio.play().catch(() => {});
       }
     });
 

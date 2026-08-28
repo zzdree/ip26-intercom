@@ -1,4 +1,4 @@
-# Product Requirements Document — IP26 Intercom
+# Product Requirements Document — IP26-Intercom
 
 > **Project:** `ip26-intercom`
 > **Owner:** Andreas (kru produksi IP26 — UKK UNNES)

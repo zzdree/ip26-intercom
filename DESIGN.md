@@ -1,4 +1,4 @@
-# Technical Design — IP26 Intercom
+# Technical Design — IP26-Intercom
 
 > **Versi:** 1.0.0
 > **Status:** MVP — production-ready untuk venue test

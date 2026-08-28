@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  IP26 Intercom — One-click launcher (Windows)
+REM  IP26-Intercom — One-click launcher (Windows)
 REM  ----------------------------------------------------------
 REM  Klik dua kali file ini untuk menjalankan server lokal.
 REM  Tidak perlu install apa-apa lagi (paket sudah terinstall).
@@ -11,7 +11,7 @@ REM  Bagikan alamat itu ke kru yang satu WiFi.
 REM ============================================================
 
 setlocal
-title IP26 Intercom Server
+title IP26-Intercom Server
 cd /d "%~dp0"
 
 echo.

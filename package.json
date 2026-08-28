@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "express": "^4.19.2",
+    "selfsigned": "^5.5.0",
     "ws": "^8.18.0"
   }
 }

@@ -1,4 +1,4 @@
-# 🎙️ IP26 Intercom
+# 🎙️ IP26-Intercom
 
 > **Push-to-talk intercom web untuk kru produksi event.**
 > Zero-install, jalan di WiFi lokal, tanpa internet.
@@ -74,7 +74,7 @@ Saat event live, kru produksi tersebar di venue: camera di balcony, switcher di 
 | 📱 WhatsApp voice note | Satu arah, delay, nggak real-time. |
 | 🗣️ Teriak | Nggak reliable untuk cue yang presisi. |
 
-**Insight:** kru produksi sudah bawa HP. Venue sudah punya WiFi. Yang kurang cuma **software-nya**. IP26 Intercom = software itu.
+**Insight:** kru produksi sudah bawa HP. Venue sudah punya WiFi. Yang kurang cuma **software-nya**. IP26-Intercom = software itu.
 
 ---
 
@@ -98,7 +98,7 @@ Saat event live, kru produksi tersebar di venue: camera di balcony, switcher di 
 
 Pertanyaan yang sering muncul: *"Kan bisa pake Discord, kenapa bikin sendiri?"*
 
-| | **IP26 Intercom** | **Discord** |
+| | **IP26-Intercom** | **Discord** |
 | --- | --- | --- |
 | 💰 Biaya | Gratis, self-host | Gratis (dengan limit), Nitro $10/bln untuk quality |
 | 🌐 Internet | **Tidak butuh** | Wajib |
@@ -113,7 +113,7 @@ Pertanyaan yang sering muncul: *"Kan bisa pake Discord, kenapa bikin sendiri?"*
 | 🛠️ Customizability | Full source, fork sesuka hati | Tertutup, EULA |
 | 🔋 Battery HP | Hemat (P2P LAN, short routes) | Lebih boros (cloud route) |
 
-**Ringkas:** Discord itu **komunikasi umum via internet**. IP26 Intercom itu **komunikasi event-kru via WiFi lokal**. Keduanya punya use case, tapi untuk live event tanpa internet, IP26 Intercom menang telak di latency, privacy, dan simplicity.
+**Ringkas:** Discord itu **komunikasi umum via internet**. IP26-Intercom itu **komunikasi event-kru via WiFi lokal**. Keduanya punya use case, tapi untuk live event tanpa internet, IP26-Intercom menang telak di latency, privacy, dan simplicity.
 
 ---
 
@@ -175,7 +175,7 @@ Event akademik tahunan Universitas Negeri Semarang. Kru produksi:
 - 1× **Audio FOH** (sound engineer)
 - 1× **Time Keeper** (running order)
 
-**Tanpa IP26 Intercom:** mereka teriak-teriakan atau lari ke switcher buat kasih cue. **Dengan IP26 Intercom:** satu tombol PTT di HP, cue "CAM 2 take 3" langsung terdengar semua kru.
+**Tanpa IP26-Intercom:** mereka teriak-teriakan atau lari ke switcher buat kasih cue. **Dengan IP26-Intercom:** satu tombol PTT di HP, cue "CAM 2 take 3" langsung terdengar semua kru.
 
 ---
 

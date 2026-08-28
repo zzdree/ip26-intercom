@@ -1,5 +1,5 @@
 /* ============================================================================
-   intercom IP26 — Stylesheet
+   IP26-Intercom — Stylesheet
    -----------------------------------------------------------------------------
    Vanilla CSS, mobile-first, dual-theme (dark default, light via [data-theme])
    Konsisten dengan filosofi visual ip26-production (PRD.md FR-03).
@@ -432,7 +432,7 @@ a:focus:not(:focus-visible) {
 .status-line { font-family: var(--font-mono); }
 
 /* ============================================================================
-   intercom PAGE
+   IP26-Intercom PAGE
    ============================================================================ */
 .intercom-body {
   background: var(--bg-page);
@@ -1012,4 +1012,82 @@ a:focus:not(:focus-visible) {
   }
   .ptt-icon { font-size: 64px; }
   .ptt-label { font-size: 20px; }
+}
+
+/* ---------- Audio device picker ---------- */
+.device-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.device-row label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  min-width: 64px;
+}
+
+.device-row select {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  background: var(--bg-elev-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23808080' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px;
+  padding-right: 24px;
+  text-overflow: ellipsis;
+}
+
+.device-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+@media (max-width: 380px) {
+  .device-row label { min-width: 56px; font-size: 10px; }
+  .device-row select { font-size: 12px; }
+}
+
+/* ---------- Warn toast ---------- */
+.toast-warn {
+  border-color: var(--accent-yellow);
+  background: linear-gradient(135deg, var(--bg-elev-2), rgba(255, 193, 7, 0.18));
+  color: white;
+}
+
+/* ---------- Disabled button (during enter gate) ---------- */
+.ptt-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  filter: saturate(0.7);
+}
+
+.ptt-button:disabled:hover {
+  transform: none;
 }

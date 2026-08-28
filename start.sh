@@ -1,6 +1,6 @@
 #!/bin/sh
 # ============================================================
-#  IP26 Intercom — One-click launcher (macOS / Linux)
+#  IP26-Intercom — One-click launcher (macOS / Linux)
 #  ----------------------------------------------------------
 #  Jalankan dari terminal: ./start.sh
 #  Atau klik dua kali jika OS mendukung eksekusi .sh.

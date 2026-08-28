@@ -1,64 +1,110 @@
 /**
- * intercom IP26 — Signaling Server
+ * IP26-Intercom — Signaling Server (HTTP + HTTPS paralel)
  * -----------------------------------------------------------------------------
  * Self-hosted WebSocket signaling untuk WebRTC mesh antar HP kru produksi.
- * Server TIDAK relay audio — audio stream peer-to-peer via WebRTC setelah
- * signaling handshake. Server hanya:
- *   1. Track siapa saja yang terhubung (presence)
- *   2. Tukar SDP offer/answer + ICE candidates antar peer
- *   3. Broadcast status PTT (siapa yang sedang bicara) ke semua kru
- *   4. Admin API: list / kick / broadcast
+ *
+ * Server listen di DUA protokol:
+ *   - HTTP  :3000 — admin / fallback
+ *   - HTTPS :3443 — PRIMARY untuk HP kru (getUserMedia butuh secure context)
+ *
+ * HTTPS pakai self-signed cert yang di-generate on-the-fly. Saat pertama akses
+ * dari HP, browser tampil "Not Secure" — klik Advanced → Proceed. Setelah itu
+ * Chrome mengingat pengecualian dan getUserMedia(mic) langsung muncul prompt-nya.
  *
  * Jalankan:   npm install
  *             npm start
  *             node server.js
- *
- * Default port: 3000 (override via PORT env)
- * Listen: 0.0.0.0 (supaya bisa diakses dari device lain di WiFi lokal)
- *
- * 🌐 Jaringan target: WiFi `unnes-id` (auditorium).
- *    Divalidasi works tanpa internet — kru QL Stage Mix iPad sudah
- *    terbukti bisa kontrol mixer Yamaha QL5 via WiFi yang sama.
- *    Artinya: WebRTC P2P antar HP kru akan jalan tanpa TURN.
- *    TURN hanya jadi safety net kalau campus WiFi tiba-tiba block P2P.
  * -----------------------------------------------------------------------------
  */
 
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
+const selfsigned = require('selfsigned');
 const { WebSocketServer, WebSocket } = require('ws');
 
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const PORT_HTTP = parseInt(process.env.PORT || '3000', 10);
+const PORT_HTTPS = parseInt(process.env.PORT_HTTPS || '3443', 10);
 const HOST = process.env.HOST || '0.0.0.0';
 
-const app = express();
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+// TURN server config from env (secure, not exposed to client directly)
+const TURN_CONFIG = {
+    username: process.env.TURN_USERNAME || 'e7f3a4b2c1d9e8f6a5b4c3d2e1f0a9b8',
+    credential: process.env.TURN_CREDENTIAL || 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
+    urls: [
+        'turn:global.turn.metered.ca:80',
+        'turn:global.turn.metered.ca:443'
+    ]
+};
 
-// Serve static files
+// CSP header middleware
+app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy',
+        "default-src 'self'; " +
+        "script-src 'self'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data:; " +
+        "font-src 'self' data:; " +
+        "connect-src 'self' wss: https:; " +
+        "media-src 'self' blob:; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'"
+    );
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    next();
+});
+
+// ============================================================================
+// 1. APP & STATIC ASSETS
+// ============================================================================
+const app = express();
+
 app.use(express.static(path.join(__dirname, 'public'), {
     extensions: ['html'],
     setHeaders: (res, filePath) => {
-        // Hindari caching agresif selama event (supaya update langsung terasa)
         if (filePath.endsWith('.html')) {
             res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         }
     }
 }));
 
-// Health check (untuk verify server hidup)
+// TURN config endpoint - serves credentials securely from server
+app.get('/api/turn-config', (req, res) => {
+    res.json({
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            {
+                urls: TURN_CONFIG.urls[0],
+                username: TURN_CONFIG.username,
+                credential: TURN_CONFIG.credential
+            },
+            {
+                urls: TURN_CONFIG.urls[1],
+                username: TURN_CONFIG.username,
+                credential: TURN_CONFIG.credential
+            }
+        ],
+        iceCandidatePoolSize: 10
+    });
+});
+
 app.get('/health', (req, res) => {
     res.json({
         status: 'ok',
         uptime: process.uptime(),
         clients: clients.size,
-        version: '1.1.0'
+        version: '1.2.0',
+        https: true
     });
 });
 
-// Admin: lihat snapshot semua peer (untuk dashboard production lead)
 app.get('/api/peers', (req, res) => {
     const list = [];
     for (const [id, c] of clients) {
@@ -70,14 +116,14 @@ app.get('/api/peers', (req, res) => {
             speaking: c.speaking === true,
             joinedAt: c.joinedAt,
             lastSeen: c.lastSeen,
-            ip: c.ip
+            ip: c.ip,
+            secure: c.secure === true
         });
     }
     list.sort((a, b) => a.joinedAt - b.joinedAt);
     res.json({ count: list.length, peers: list, serverTime: Date.now() });
 });
 
-// Admin: kick peer by id
 app.post('/api/kick', express.json(), (req, res) => {
     const { id, reason } = req.body || {};
     if (!id) return res.status(400).json({ ok: false, error: 'id required' });
@@ -92,7 +138,6 @@ app.post('/api/kick', express.json(), (req, res) => {
     res.json({ ok: true });
 });
 
-// Admin: broadcast system message ke semua kru
 app.post('/api/broadcast', express.json(), (req, res) => {
     const { text } = req.body || {};
     const t = String(text || '').trim().slice(0, 200);
@@ -103,9 +148,65 @@ app.post('/api/broadcast', express.json(), (req, res) => {
 });
 
 // ============================================================================
-// CLIENT REGISTRY
+// 2. SELF-SIGNED CERTIFICATE
 // ============================================================================
-// Map<id, { ws, role, name, joinedAt, lastSeen }>
+async function generateCert() {
+    const certPath = path.join(__dirname, '.cert.pem');
+    const keyPath = path.join(__dirname, '.key.pem');
+
+    if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+        const age = Date.now() - fs.statSync(certPath).mtimeMs;
+        if (age < 30 * 24 * 60 * 60 * 1000) {
+            console.log('[cert] Reusing existing self-signed certificate');
+            return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+        }
+    }
+
+    console.log('[cert] Generating new self-signed certificate (~500ms)...');
+
+    // SAN: pisahkan DNS names (type 2) dari IPv4 (type 7). Jangan campur.
+    const dnsNames = ['localhost', 'intercom-ip26.local'];
+    const ipv4s = ['127.0.0.1'];
+    const interfaces = os.networkInterfaces();
+    const seen = new Set(ipv4s);
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(iface.address) && !seen.has(iface.address)) {
+                    seen.add(iface.address);
+                    ipv4s.push(iface.address);
+                }
+            }
+        }
+    }
+
+    const attrs = [{ name: 'commonName', value: 'intercom-ip26.local' }];
+    const pems = await selfsigned.generate(attrs, {
+        algorithm: 'sha256',
+        days: 365,
+        keySize: 2048,
+        extensions: [
+            { name: 'basicConstraints', cA: true },
+            {
+                name: 'subjectAltName',
+                altNames: [
+                    ...dnsNames.map(d => ({ type: 2, value: d })),
+                    ...ipv4s.map(ip => ({ type: 7, ip }))
+                ]
+            }
+        ]
+    });
+
+    fs.writeFileSync(certPath, pems.cert);
+    fs.writeFileSync(keyPath, pems.private);
+    console.log(`[cert] Generated. DNS: ${dnsNames.join(', ')} | IPv4: ${ipv4s.join(', ')}`);
+
+    return { cert: pems.cert, key: pems.private };
+}
+
+// ============================================================================
+// 3. CLIENT REGISTRY & HELPERS
+// ============================================================================
 const clients = new Map();
 
 function generateId() {
@@ -114,17 +215,10 @@ function generateId() {
 
 function getRoleLabel(role) {
     const labels = {
-        cam1: 'CAM 1',
-        cam2: 'CAM 2',
-        cam3: 'CAM 3',
-        cam4: 'CAM 4',
-        switcher: 'Switcher',
-        production: 'Produksi',
-        ppt1: 'ProPresenter 1',
-        ppt2: 'ProPresenter 2',
-        audio: 'Audio FOH',
-        timekeeper: 'Time Keeper',
-        other: 'Lainnya'
+        cam1: 'CAM 1', cam2: 'CAM 2', cam3: 'CAM 3', cam4: 'CAM 4',
+        switcher: 'Switcher', production: 'Produksi',
+        ppt1: 'ProPresenter 1', ppt2: 'ProPresenter 2',
+        audio: 'Audio FOH', timekeeper: 'Time Keeper', other: 'Lainnya'
     };
     return labels[role] || role || 'Unknown';
 }
@@ -133,15 +227,13 @@ function getPublicList() {
     const list = [];
     for (const [id, c] of clients) {
         list.push({
-            id,
-            role: c.role,
-            name: c.name,
+            id, role: c.role, name: c.name,
             roleLabel: getRoleLabel(c.role),
             joinedAt: c.joinedAt,
-            speaking: c.speaking === true
+            speaking: c.speaking === true,
+            secure: c.secure === true
         });
     }
-    // Sort: switcher & production first, then cams, then others
     const priority = { switcher: 1, production: 2, cam1: 3, cam2: 4, cam3: 5, cam4: 6 };
     list.sort((a, b) => (priority[a.role] || 99) - (priority[b.role] || 99));
     return list;
@@ -149,12 +241,8 @@ function getPublicList() {
 
 function safeSend(ws, payload) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-        try {
-            ws.send(JSON.stringify(payload));
-            return true;
-        } catch (e) {
-            return false;
-        }
+        try { ws.send(JSON.stringify(payload)); return true; }
+        catch (e) { return false; }
     }
     return false;
 }
@@ -164,11 +252,7 @@ function broadcast(payload, excludeId = null) {
     for (const [id, c] of clients) {
         if (id === excludeId) continue;
         if (c.ws.readyState === WebSocket.OPEN) {
-            try {
-                c.ws.send(data);
-            } catch (e) {
-                // ignore
-            }
+            try { c.ws.send(data); } catch (e) { /* ignore */ }
         }
     }
 }
@@ -178,66 +262,54 @@ function broadcastPresence() {
 }
 
 // ============================================================================
-// WEBSOCKET HANDLERS
+// 4. WEBSOCKET HANDLERS
 // ============================================================================
+function handleConnection(wss, secure) {
+    wss.on('connection', (ws, req) => {
+        const id = generateId();
+        const ip = req.socket.remoteAddress;
+        clients.set(id, {
+            ws, role: null, name: null,
+            joinedAt: Date.now(), lastSeen: Date.now(),
+            speaking: false, ip, secure
+        });
 
-wss.on('connection', (ws, req) => {
-    const id = generateId();
-    const ip = req.socket.remoteAddress;
-    clients.set(id, {
-        ws,
-        role: null,
-        name: null,
-        joinedAt: Date.now(),
-        lastSeen: Date.now(),
-        speaking: false,
-        ip
-    });
+        const proto = secure ? 'WSS' : 'WS';
+        console.log(`[+] ${id} connected via ${proto} from ${ip} (total: ${clients.size})`);
 
-    console.log(`[+] ${id} connected from ${ip} (total: ${clients.size})`);
-
-    // Kirim hello dengan id assigned
-    safeSend(ws, { type: 'hello', id, serverTime: Date.now() });
-
-    // Broadcast presence baru
-    broadcastPresence();
-
-    // Heartbeat: detect dead connections
-    ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
-
-    ws.on('message', (raw) => {
-        let msg;
-        try {
-            msg = JSON.parse(raw.toString());
-        } catch (e) {
-            console.warn(`[!] Invalid JSON from ${id}: ${raw}`);
-            return;
-        }
-
-        const client = clients.get(id);
-        if (!client) return;
-        client.lastSeen = Date.now();
-
-        handleMessage(id, client, msg);
-    });
-
-    ws.on('close', () => {
-        const c = clients.get(id);
-        console.log(`[-] ${id} (${c?.name || 'unknown'} / ${c?.role || 'unregistered'}) disconnected`);
-        clients.delete(id);
+        safeSend(ws, { type: 'hello', id, secure, serverTime: Date.now() });
         broadcastPresence();
-    });
 
-    ws.on('error', (err) => {
-        console.error(`[!] WS error for ${id}:`, err.message);
+        ws.isAlive = true;
+        ws.on('pong', () => { ws.isAlive = true; });
+
+        ws.on('message', (raw) => {
+            let msg;
+            try { msg = JSON.parse(raw.toString()); }
+            catch (e) { console.warn(`[!] Invalid JSON from ${id}: ${raw}`); return; }
+
+            const client = clients.get(id);
+            if (!client) return;
+            client.lastSeen = Date.now();
+            handleMessage(id, client, msg);
+        });
+
+        ws.on('close', () => {
+            const c = clients.get(id);
+            console.log(`[-] ${id} (${c?.name || 'unknown'} / ${c?.role || 'unregistered'}) disconnected`);
+            clients.delete(id);
+            broadcastPresence();
+        });
+
+        ws.on('error', (err) => {
+            console.error(`[!] WS error for ${id}:`, err.message);
+        });
     });
-});
+}
 
 function handleMessage(fromId, client, msg) {
     switch (msg.type) {
 
-        // ----- Registrasi awal: role + nama kru -----------------------------
         case 'register': {
             const { role, name } = msg;
             if (!role || !name) {
@@ -248,22 +320,15 @@ function handleMessage(fromId, client, msg) {
             client.name = trimmedName;
             console.log(`[*] ${fromId} registered as ${client.role} / ${trimmedName}`);
 
-            // Konfirmasi ke client yg baru daftar + kirim full peer list
             safeSend(client.ws, {
-                type: 'registered',
-                id: fromId,
-                role: client.role,
-                name: client.name
+                type: 'registered', id: fromId,
+                role: client.role, name: client.name
             });
 
-            // Broadcast ke semua
             broadcastPresence();
 
-            // Beri tahu peer lain untuk initiate WebRTC ke newcomer
             const newcomer = { id: fromId, role: client.role, name: client.name };
-            // Existing peers diminta membuat offer ke newcomer
             broadcast({ type: 'new-peer', peer: newcomer }, fromId);
-            // Newcomer diminta membuat offer ke semua existing peers
             const existingPeers = getPublicList()
                 .filter(p => p.id !== fromId)
                 .map(p => ({ id: p.id, role: p.role, name: p.name }));
@@ -271,7 +336,6 @@ function handleMessage(fromId, client, msg) {
             break;
         }
 
-        // ----- WebRTC signaling relay (SDP + ICE) ----------------------------
         case 'signal': {
             const { target, signal } = msg;
             if (!target || !signal) return;
@@ -280,27 +344,18 @@ function handleMessage(fromId, client, msg) {
                 return safeSend(client.ws, { type: 'error', error: `target ${target} not found` });
             }
             safeSend(targetClient.ws, {
-                type: 'signal',
-                from: fromId,
-                fromRole: client.role,
-                fromName: client.name,
-                signal
+                type: 'signal', from: fromId,
+                fromRole: client.role, fromName: client.name, signal
             });
             break;
         }
 
-        // ----- PTT state broadcast ------------------------------------------
         case 'ptt-on': {
             if (!client.role) return;
-            // Validasi: hanya 1 yang boleh bicara pada satu waktu (opsional)
-            // Kita broadcast ke semua peer bahwa kru ini mulai bicara
             client.speaking = true;
             broadcast({
-                type: 'ptt-state',
-                from: fromId,
-                fromRole: client.role,
-                fromName: client.name,
-                state: 'on'
+                type: 'ptt-state', from: fromId,
+                fromRole: client.role, fromName: client.name, state: 'on'
             });
             console.log(`[ptt] ${client.name} (${client.role}) mulai bicara`);
             break;
@@ -310,17 +365,13 @@ function handleMessage(fromId, client, msg) {
             if (!client.role) return;
             client.speaking = false;
             broadcast({
-                type: 'ptt-state',
-                from: fromId,
-                fromRole: client.role,
-                fromName: client.name,
-                state: 'off'
+                type: 'ptt-state', from: fromId,
+                fromRole: client.role, fromName: client.name, state: 'off'
             });
             console.log(`[ptt] ${client.name} (${client.role}) selesai bicara`);
             break;
         }
 
-        // ----- Ping (client-side latency check) ------------------------------
         case 'ping': {
             safeSend(client.ws, { type: 'pong', t: msg.t, serverTime: Date.now() });
             break;
@@ -331,27 +382,29 @@ function handleMessage(fromId, client, msg) {
     }
 }
 
-// Heartbeat interval: terminate dead connections
-const heartbeat = setInterval(() => {
-    for (const [id, c] of clients) {
-        if (c.ws.readyState === WebSocket.OPEN) {
-            if (c.ws.isAlive === false) {
-                console.log(`[~] ${id} failed heartbeat, terminating`);
-                c.ws.terminate();
-                clients.delete(id);
-                broadcastPresence();
-                continue;
+let heartbeat = null;
+
+function startHeartbeat() {
+    heartbeat = setInterval(() => {
+        for (const [id, c] of clients) {
+            if (c.ws.readyState === WebSocket.OPEN) {
+                if (c.ws.isAlive === false) {
+                    console.log(`[~] ${id} failed heartbeat, terminating`);
+                    c.ws.terminate();
+                    clients.delete(id);
+                    broadcastPresence();
+                    continue;
+                }
+                c.ws.isAlive = false;
+                try { c.ws.ping(); } catch (e) { /* ignore */ }
             }
-            c.ws.isAlive = false;
-            try { c.ws.ping(); } catch (e) { /* ignore */ }
         }
-    }
-}, 30000);
+    }, 30000);
+}
 
 // ============================================================================
-// STARTUP
+// 5. STARTUP
 // ============================================================================
-
 function getLocalIPs() {
     const interfaces = os.networkInterfaces();
     const ips = [];
@@ -365,25 +418,29 @@ function getLocalIPs() {
     return ips;
 }
 
-server.listen(PORT, HOST, () => {
+function printBanner() {
     const ips = getLocalIPs();
     console.log('');
     console.log('================================================================');
-    console.log('  🎙️  intercom IP26 — Signaling Server Aktif');
+    console.log('  🎙️  IP26-Intercom — Signaling Server Aktif (HTTP + HTTPS)');
     console.log('================================================================');
-    console.log(`  Port     : ${PORT}`);
-    console.log(`  Host     : ${HOST}`);
-    console.log(`  Mode     : WebRTC mesh (P2P audio, signaling only)`);
-    console.log(`  Maks     : 12 peer simultan (cocok untuk tim produksi)`);
+    console.log(`  HTTP   : ${PORT_HTTP}   (fallback / admin)`);
+    console.log(`  HTTPS  : ${PORT_HTTPS}   (PRIMARY — wajib untuk mic di HP)`);
+    console.log(`  Host   : ${HOST}`);
+    console.log(`  Mode   : WebRTC mesh (P2P audio, signaling only)`);
+    console.log(`  Maks   : 12 peer simultan`);
     console.log('----------------------------------------------------------------');
     console.log('  📡  Akses dari device di WiFi lokal yang sama:');
-    console.log(`     📱 /intercom    — HP kru (PTT)`);
-    console.log(`     👑 /admin       — Dashboard production lead (laptop/desktop)`);
-    console.log(`     🔌 /api/peers   — JSON snapshot semua peer`);
-    console.log(`     💚 /health      — Server status`);
+    console.log(`     📱 HTTPS intercom → https://<IP>:${PORT_HTTPS}/intercom   (WAJIB HTTPS!)`);
+    console.log(`     👑 HTTP  admin    → http://<IP>:${PORT_HTTP}/admin`);
+    console.log(`     🔌 API  peers     → http://<IP>:${PORT_HTTP}/api/peers`);
+    console.log(`     💚 Health         → http://<IP>:${PORT_HTTP}/health`);
+    console.log('----------------------------------------------------------------');
+    console.log('  ⚠️  HTTPS akan tampil "Not Secure" — itu NORMAL untuk self-signed.');
+    console.log('     Klik "Advanced" → "Proceed to ..." sekali, lalu mic akan jalan.');
     console.log('----------------------------------------------------------------');
     for (const { name, address } of ips) {
-        console.log(`     → http://${address}:${PORT}    [${name}]`);
+        console.log(`     → http://${address}:${PORT_HTTP}  &  https://${address}:${PORT_HTTPS}  [${name}]`);
     }
     if (ips.length === 0) {
         console.log('     ⚠️  Tidak ada IP LAN terdeteksi. Cek koneksi WiFi.');
@@ -392,17 +449,41 @@ server.listen(PORT, HOST, () => {
     console.log('  ⏹️   Tekan Ctrl+C untuk menghentikan server.');
     console.log('================================================================');
     console.log('');
-});
-
-// Graceful shutdown
-function shutdown(signal) {
-    console.log(`\n[!] Received ${signal}, shutting down...`);
-    clearInterval(heartbeat);
-    broadcast({ type: 'server-shutdown' });
-    setTimeout(() => {
-        wss.close();
-        server.close(() => process.exit(0));
-    }, 500);
 }
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+async function main() {
+    const tlsMaterial = await generateCert();
+
+    const httpServer = http.createServer(app);
+    const httpsServer = https.createServer(tlsMaterial, app);
+
+    const wssHttp = new WebSocketServer({ server: httpServer, path: '/ws' });
+    const wssHttps = new WebSocketServer({ server: httpsServer, path: '/ws' });
+
+    handleConnection(wssHttp, false);
+    handleConnection(wssHttps, true);
+
+    startHeartbeat();
+
+    httpServer.listen(PORT_HTTP, HOST, printBanner);
+    httpsServer.listen(PORT_HTTPS, HOST, () => { /* banner sudah di-print */ });
+
+    function shutdown(signal) {
+        console.log(`\n[!] Received ${signal}, shutting down...`);
+        if (heartbeat) clearInterval(heartbeat);
+        broadcast({ type: 'server-shutdown' });
+        setTimeout(() => {
+            wssHttp.close();
+            wssHttps.close();
+            httpServer.close(() => {});
+            httpsServer.close(() => process.exit(0));
+        }, 500);
+    }
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+main().catch(err => {
+    console.error('[FATAL] Failed to start server:', err);
+    process.exit(1);
+});

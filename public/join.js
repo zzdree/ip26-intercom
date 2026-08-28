@@ -1,5 +1,5 @@
 /**
- * intercom IP26 — Join page logic
+ * IP26-Intercom — Join page logic
  * -----------------------------------------------------------------------------
  * Validates form, registers identity with signaling server via WebSocket,
  * then navigates to intercom.html. Self-contained, no build step.
@@ -97,6 +97,10 @@
         };
         try {
           sessionStorage.setItem('intercom-identity', JSON.stringify(identity));
+          // Mark this as a "warmed" user gesture context — the join button click
+          // Mark this as a "warmed" user gesture context — the join button click    // already counts as a user gesture, so intercom.html can request mic
+          // permission immediately without showing the enter-gate overlay.
+          sessionStorage.setItem('intercom-warmed', '1');
         } catch (e) { /* private mode etc. */ }
         // Redirect
         window.location.href = 'intercom.html';
