@@ -6,6 +6,7 @@
  * dari server. Tidak perlu register karena admin = listener only.
  *
  * Kontrol: refresh peer list, kick peer, broadcast system message.
+ * QR Code sharing via qrcodejs (CDN).
  * ------------------------------------------------------------------
  */
 
@@ -27,15 +28,93 @@ const ui = {
   broadcastText: $('#broadcastText'),
   refreshBtn: $('#refreshBtn'),
   clearLogBtn: $('#clearLogBtn'),
-  toastStack: $('#toastStack')
+  toastStack: $('#toastStack'),
+  // QR Share UI
+  shareCard: $('#shareCard'),
+  intercomUrlInput: $('#intercomUrlInput'),
+  adminUrlInput: $('#adminUrlInput'),
+  copyIntercomBtn: $('#copyIntercomBtn'),
+  copyAdminBtn: $('#copyAdminBtn'),
+  qrIntercomBtn: $('#qrIntercomBtn'),
+  qrAdminBtn: $('#qrAdminBtn'),
+  qrPreview: $('#qrPreview'),
+  qrTitle: $('#qrTitle'),
+  qrCanvas: $('#qrCanvas'),
+  closeQrBtn: $('#closeQrBtn'),
+  fullscreenQrBtn: $('#fullscreenQrBtn'),
+  downloadQrBtn: $('#downloadQrBtn'),
+  // Fullscreen QR Modal
+  fullscreenQrModal: $('#fullscreenQrModal'),
+  fullscreenQrTitle: $('#fullscreenQrTitle'),
+  fullscreenQrCanvas: $('#fullscreenQrCanvas'),
+  closeFullscreenQrBtn: $('#closeFullscreenQrBtn'),
+  closeFullscreenQrBtn2: $('#closeFullscreenQrBtn2'),
+  downloadFullscreenQrBtn: $('#downloadFullscreenQrBtn')
 };
 
 const state = {
   ws: null,
   connected: false,
   currentSpeaker: null,
-  peers: new Map()
+  peers: new Map(),
+  // QR state
+  currentQrUrl: null,
+  currentQrTitle: null,
+  qrCodeLibLoaded: false
 };
+
+// ============================================================================
+// QR CODE LIBRARY LOADER (qrcodejs via CDN)
+// ============================================================================
+
+function loadQrCodeLibrary() {
+  if (state.qrCodeLibLoaded || window.QRCode) {
+    state.qrCodeLibLoaded = true;
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+    script.onload = () => {
+      state.qrCodeLibLoaded = true;
+      console.log('[admin] qrcodejs loaded from CDN');
+      resolve();
+    };
+    script.onerror = () => {
+      console.error('[admin] Failed to load qrcodejs from CDN');
+      reject(new Error('QR library load failed'));
+    };
+    document.head.appendChild(script);
+  });
+}
+
+// Generate QR code using qrcodejs
+function generateQrCode(text, canvas, size = 256) {
+  if (!window.QRCode) {
+    console.warn('[admin] QRCode not loaded yet');
+    return;
+  }
+  // Clear canvas first
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // qrcodejs writes to a div, so we create a temporary div
+  const tempDiv = document.createElement('div');
+  new window.QRCode(tempDiv, {
+    text: text,
+    width: size,
+    height: size,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: window.QRCode.CorrectLevel.M
+  });
+  // Copy from tempDiv's canvas to our canvas
+  const tempCanvas = tempDiv.querySelector('canvas');
+  if (tempCanvas) {
+    canvas.width = size;
+    canvas.height = size;
+    ctx.drawImage(tempCanvas, 0, 0, size, size);
+  }
+}
 
 // ============================================================================
 // WEBSOCKET
@@ -109,13 +188,11 @@ function handleMessage(msg) {
       break;
 
     case 'system':
-      // Broadcast masuk dari admin lain atau via API
       toast(`📣 ${msg.text}`);
       addLog('system', `Broadcast: ${msg.text}`);
       break;
 
     case 'kicked':
-      // Tidak relevan untuk admin (admin tidak bisa di-kick dari server)
       break;
 
     case 'server-shutdown':
@@ -168,7 +245,6 @@ function renderPeers() {
     `;
   }).join('');
 
-  // Wire up kick buttons
   $$('.kick-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.id;
@@ -196,7 +272,6 @@ function setCurrentSpeaker(speaker) {
     ui.speakerNow.querySelector('.badge').textContent = 'IDLE';
     ui.statSpeak.style.display = 'none';
   }
-  // Re-render peers untuk update border speaking
   renderPeers();
 }
 
@@ -216,7 +291,6 @@ function roleLabel(role) {
 
 function addLog(kind, text) {
   const time = new Date().toTimeString().slice(0, 8);
-  // Remove empty placeholder
   if (ui.logList.querySelector('.empty-log')) {
     ui.logList.innerHTML = '';
   }
@@ -225,7 +299,6 @@ function addLog(kind, text) {
   item.innerHTML = `<span class="time">${time}</span><span>${escapeHtml(text)}</span>`;
   ui.logList.insertBefore(item, ui.logList.firstChild);
 
-  // Cap 200 entries
   while (ui.logList.children.length > 200) {
     ui.logList.removeChild(ui.logList.lastChild);
   }
@@ -309,8 +382,100 @@ function toast(text, durationMs = 3000) {
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    '&': '&', '<': '<', '>': '>', '"': '"', "'": '''
   }[c]));
+}
+
+// Copy to clipboard helper
+async function copyToClipboard(text, label = 'Teks') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(`✓ ${label} disalin ke clipboard`);
+  } catch (e) {
+    toast(`Gagal salin: ${e.message}`);
+  }
+}
+
+// ============================================================================
+// QR CODE HANDLERS
+// ============================================================================
+
+async function showQrPreview(title, url, canvas) {
+  state.currentQrUrl = url;
+  state.currentQrTitle = title;
+
+  await loadQrCodeLibrary();
+
+  ui.qrTitle.textContent = title;
+  ui.qrPreview.style.display = 'block';
+
+  // Generate QR
+  generateQrCode(url, canvas, 256);
+
+  // Scroll to preview
+  ui.qrPreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function showFullscreenQr(title, url, canvas) {
+  state.currentQrUrl = url;
+  state.currentQrTitle = title;
+
+  await loadQrCodeLibrary();
+
+  ui.fullscreenQrTitle.textContent = title;
+  ui.fullscreenQrModal.style.display = 'flex';
+
+  // Generate QR at larger size for fullscreen
+  generateQrCode(url, canvas, 512);
+}
+
+function hideQrPreview() {
+  ui.qrPreview.style.display = 'none';
+}
+
+function hideFullscreenQr() {
+  ui.fullscreenQrModal.style.display = 'none';
+}
+
+async function downloadQrPng(canvas, filename = 'qrcode.png') {
+  try {
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    toast('✓ QR code diunduh sebagai PNG');
+  } catch (e) {
+    toast('Gagal unduh: ' + e.message);
+  }
+}
+
+// ============================================================================
+// SERVER INFO & INIT
+// ============================================================================
+
+async function loadServerInfo() {
+  try {
+    const res = await fetch('/api/server-info');
+    if (!res.ok) throw new Error('Failed to fetch server info');
+    const data = await res.json();
+
+    const intercomUrl = data.urls.intercom;
+    const adminUrl = data.urls.admin;
+
+    ui.intercomUrlInput.value = intercomUrl;
+    ui.adminUrlInput.value = adminUrl;
+
+    ui.shareCard.style.display = 'block';
+
+    console.log('[admin] Server info loaded:', data);
+  } catch (e) {
+    console.warn('[admin] Failed to load server info:', e);
+    const proto = location.protocol === 'https:' ? 'https' : 'http';
+    const host = location.host;
+    ui.intercomUrlInput.value = `${proto}://${host}/intercom`;
+    ui.adminUrlInput.value = `${proto}://${host}/admin`;
+    ui.shareCard.style.display = 'block';
+  }
 }
 
 // ============================================================================
@@ -337,7 +502,31 @@ ui.clearLogBtn.addEventListener('click', () => {
   ui.logList.innerHTML = '<div class="log-item empty-log"><span class="time">--:--:--</span><span>Log dikosongkan</span></div>';
 });
 
+// QR button handlers
+ui.copyIntercomBtn.addEventListener('click', () => copyToClipboard(ui.intercomUrlInput.value, 'Intercom URL'));
+ui.copyAdminBtn.addEventListener('click', () => copyToClipboard(ui.adminUrlInput.value, 'Admin URL'));
+
+ui.qrIntercomBtn.addEventListener('click', () => showQrPreview('QR Intercom (HTTPS untuk HP kru)', ui.intercomUrlInput.value, ui.qrCanvas));
+ui.qrAdminBtn.addEventListener('click', () => showQrPreview('QR Admin Dashboard', ui.adminUrlInput.value, ui.qrCanvas));
+
+ui.closeQrBtn.addEventListener('click', hideQrPreview);
+
+ui.fullscreenQrBtn.addEventListener('click', () => showFullscreenQr(state.currentQrTitle, state.currentQrUrl, ui.fullscreenQrCanvas));
+ui.downloadQrBtn.addEventListener('click', () => downloadQrPng(ui.qrCanvas, 'qrcode-intercom.png'));
+
+ui.closeFullscreenQrBtn.addEventListener('click', hideFullscreenQr);
+ui.closeFullscreenQrBtn2.addEventListener('click', hideFullscreenQr);
+ui.downloadFullscreenQrBtn.addEventListener('click', () => downloadQrPng(ui.fullscreenQrCanvas, 'qrcode-intercom-full.png'));
+
+// Close modal on overlay click
+ui.fullscreenQrModal.addEventListener('click', (e) => {
+  if (e.target === ui.fullscreenQrModal) hideFullscreenQr();
+});
+
+// Load server info & connect WS
+loadServerInfo();
 connectWS();
+
 // Auto refresh setiap 30 detik sebagai fallback kalau WS drop
 setInterval(() => {
   if (state.connected) refreshPeers();

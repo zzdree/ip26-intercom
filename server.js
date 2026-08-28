@@ -147,6 +147,39 @@ app.post('/api/broadcast', express.json(), (req, res) => {
     res.json({ ok: true, sent: clients.size });
 });
 
+// Server info endpoint for admin page (auto-detect IP for QR/links)
+app.get('/api/server-info', (req, res) => {
+    const interfaces = os.networkInterfaces();
+    const ips = [];
+    for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                ips.push({ name, address: iface.address });
+            }
+        }
+    }
+    // Prefer the IP from request if it's a LAN IP
+    let detectedIP = req.ip || req.connection?.remoteAddress || '127.0.0.1';
+    // Clean IPv6 mapped IPv4
+    if (detectedIP.startsWith('::ffff:')) detectedIP = detectedIP.slice(7);
+    // Fallback to first LAN IP
+    const primaryIP = ips.length > 0 ? ips[0].address : detectedIP;
+    
+    res.json({
+        ips: ips.map(i => i.address),
+        primaryIP,
+        ports: { http: PORT_HTTP, https: PORT_HTTPS },
+        urls: {
+            http: `http://${primaryIP}:${PORT_HTTP}`,
+            https: `https://${primaryIP}:${PORT_HTTPS}`,
+            intercom: `https://${primaryIP}:${PORT_HTTPS}/intercom`,
+            admin: `http://${primaryIP}:${PORT_HTTP}/admin`,
+            apiPeers: `http://${primaryIP}:${PORT_HTTP}/api/peers`,
+            health: `http://${primaryIP}:${PORT_HTTP}/health`
+        }
+    });
+});
+
 // ============================================================================
 // 2. SELF-SIGNED CERTIFICATE
 // ============================================================================

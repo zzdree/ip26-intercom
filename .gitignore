@@ -32,6 +32,14 @@ test-output/
 coverage/
 .nyc_output/
 
+# Self-signed certificates (auto-generated at runtime)
+.cert.pem
+.key.pem
+
+# Test files (remove or move to test/ folder)
+test-cert*.js
+test-ifaces.js
+
 # Build artifacts (jika nanti ada build)
 dist/
 build/

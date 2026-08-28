@@ -146,12 +146,52 @@
     </section>
 
     <section class="card">
-      <header class="card-head"><h3>🔗 Quick Links</h3></header>
-      <div class="card-body" style="display: flex; flex-direction: column; gap: 8px;">
-        <a href="intercom.html" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">📱 /intercom (HP kru)</a>
-        <a href="index.html" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">🚪 / (Halaman masuk)</a>
-        <a href="/api/peers" target="_blank" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">🔌 /api/peers (JSON)</a>
-        <a href="/health" target="_blank" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">💚 /health (status)</a>
+      <header class="card-head"><h3>🔗 Quick Links & Share</h3></header>
+      <div class="card-body" style="display: flex; flex-direction: column; gap: 12px;">
+        <div id="shareCard" style="display: none;">
+          <div style="background: linear-gradient(135deg, #1a1a1a, #2a1810); border: 1px solid #3a2820; border-radius: 12px; padding: 16px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
+              <h4 style="margin: 0; font-size: 14px; color: #f97316;">📱 Share ke Kru (HTTPS wajib untuk mic)</h4>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start;">
+              <div>
+                <div style="font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em;">Intercom URL (untuk HP kru)</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <input type="text" id="intercomUrlInput" readonly style="flex: 1; min-width: 200px; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px; color: #fff; font-family: ui-monospace, monospace; font-size: 12px;">
+                  <button type="button" id="copyIntercomBtn" class="copy-btn" style="background: linear-gradient(135deg, #f97316, #ea580c); border: none; color: #fff; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap;">📋 Copy</button>
+                  <button type="button" id="qrIntercomBtn" class="qr-btn" style="background: #2a2a2a; border: 1px solid #3a3a3a; color: #fff; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap;">📷 QR</button>
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 11px; color: #888; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em;">Admin URL (untuk monitoring)</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  <input type="text" id="adminUrlInput" readonly style="flex: 1; min-width: 200px; background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px; color: #fff; font-family: ui-monospace, monospace; font-size: 12px;">
+                  <button type="button" id="copyAdminBtn" class="copy-btn" style="background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; color: #fff; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap;">📋 Copy</button>
+                  <button type="button" id="qrAdminBtn" class="qr-btn" style="background: #2a2a2a; border: 1px solid #3a3a3a; color: #fff; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px; white-space: nowrap;">📷 QR</button>
+                </div>
+              </div>
+            </div>
+            <div id="qrPreview" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid #2a2a2a;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <h5 id="qrTitle" style="margin: 0; font-size: 13px; color: #ddd;"></h5>
+                <button type="button" id="closeQrBtn" style="background: transparent; border: 1px solid #2a2a2a; color: #888; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12px;">✕ Tutup</button>
+              </div>
+              <div id="qrCanvasWrap" style="display: flex; justify-content: center; align-items: center; background: #fff; border-radius: 8px; padding: 16px; max-width: 100%; overflow: auto;">
+                <canvas id="qrCanvas"></canvas>
+              </div>
+              <div style="margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" id="fullscreenQrBtn" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed); border: none; color: #fff; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px;">🖥️ Fullscreen QR</button>
+                <button type="button" id="downloadQrBtn" style="background: #2a2a2a; border: 1px solid #3a3a3a; color: #fff; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 12px;">💾 Download PNG</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <a href="intercom.html" class="admin-link" style="padding: 10px 12px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; display: block;">📱 /intercom (HP kru)</a>
+          <a href="index.html" class="admin-link" style="padding: 10px 12px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; display: block;">🚪 / (Halaman masuk)</a>
+          <a href="/api/peers" target="_blank" class="admin-link" style="padding: 10px 12px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; display: block;">🔌 /api/peers (JSON)</a>
+          <a href="/health" target="_blank" class="admin-link" style="padding: 10px 12px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; display: block;">💚 /health (status)</a>
+        </div>
       </div>
     </section>
 
@@ -159,8 +199,28 @@
 
 </div>
 
-<div class="toast-stack" id="toastStack" aria-live="assertive"></div>
+  <!-- Fullscreen QR Modal -->
+  <div id="fullscreenQrModal" class="fullscreen-qr-modal" style="display: none;">
+    <div class="fullscreen-qr-overlay"></div>
+    <div class="fullscreen-qr-content">
+      <div class="fullscreen-qr-header">
+        <h3 id="fullscreenQrTitle" style="margin: 0; font-size: 16px; color: #fff;">QR Code</h3>
+        <button type="button" id="closeFullscreenQrBtn" class="fullscreen-qr-close" style="background: transparent; border: none; color: #888; font-size: 24px; cursor: pointer; padding: 4px 8px; line-height: 1;">✕</button>
+      </div>
+      <div class="fullscreen-qr-body" style="display: flex; justify-content: center; align-items: center; padding: 24px; background: #fff; border-radius: 16px; margin: 16px; max-width: calc(100vw - 48px); max-height: calc(100vh - 120px); overflow: auto;">
+        <canvas id="fullscreenQrCanvas"></canvas>
+      </div>
+      <div class="fullscreen-qr-footer" style="display: flex; gap: 12px; justify-content: center; padding: 16px; border-top: 1px solid #2a2a2a; margin: 0 16px 16px;">
+        <button type="button" id="downloadFullscreenQrBtn" style="background: #2a2a2a; border: 1px solid #3a3a3a; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px;">💾 Download PNG</button>
+        <button type="button" id="closeFullscreenQrBtn2" style="background: linear-gradient(135deg, #f97316, #ea580c); border: none; color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px;">Tutup</button>
+      </div>
+    </div>
+  </div>
 
-<script src="admin.js"></script>
+  <div class="toast-stack" id="toastStack" aria-live="assertive"></div>
+
+  <script src="admin.js"></script>
 </body>
 </html>
+
+</content>
