@@ -245,6 +245,9 @@
   }
 
   async function enterRoom() {
+    // 0) Load ICE config from server (secure TURN credentials)
+    await loadIceConfigFromServer();
+
     // 1) Minta izin mic SEKALIGUS (bukan pas pencet PTT)
     await ensureLocalMic();
 
@@ -878,7 +881,8 @@
   // WEBRTC PEER CONNECTIONS
   // ============================================================================
 
-  const ICE_CONFIG = {
+  // Default fallback ICE config (used if server fetch fails)
+  const ICE_CONFIG_DEFAULT = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
@@ -895,6 +899,25 @@
     ],
     iceCandidatePoolSize: 10
   };
+
+  // This will be populated from server /api/turn-config
+  let ICE_CONFIG = ICE_CONFIG_DEFAULT;
+
+  // Load ICE config from server (secure, no hardcoded TURN creds in client)
+  async function loadIceConfigFromServer() {
+    try {
+      const res = await fetch('/api/turn-config', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        ICE_CONFIG = data;
+        console.log('[ice] Loaded ICE config from server');
+      } else {
+        console.warn('[ice] Failed to fetch ICE config, using fallback');
+      }
+    } catch (e) {
+      console.warn('[ice] Error fetching ICE config, using fallback:', e.message);
+    }
+  }
 
   function handlePeerList(peerList) {
     for (const peer of peerList) {

@@ -106,6 +106,40 @@ echo
 node server.js &
 SERVER_PID=$!
 
+# Tunggu sebentar supaya server siap
+sleep 2
+
+# Auto-buka browser ke Admin Dashboard & Intercom (test)
+echo -e "${YELLOW}[INFO]${NC} Membuka browser..."
+# Cross-platform browser open
+if command -v xdg-open &> /dev/null; then
+    xdg-open "http://$LOCAL_IP:3000/admin" >/dev/null 2>&1
+    xdg-open "https://$LOCAL_IP:3443" >/dev/null 2>&1
+elif command -v open &> /dev/null; then
+    open "http://$LOCAL_IP:3000/admin" >/dev/null 2>&1
+    open "https://$LOCAL_IP:3443" >/dev/null 2>&1
+elif command -v start &> /dev/null; then
+    start "" "http://$LOCAL_IP:3000/admin" >/dev/null 2>&1
+    start "" "https://$LOCAL_IP:3443" >/dev/null 2>&1
+else
+    echo -e "${YELLOW}[WARN]${NC} Tidak bisa auto-buka browser. Buka manual:"
+    echo -e "  Admin: http://$LOCAL_IP:3000/admin"
+    echo -e "  Intercom: https://$LOCAL_IP:3443"
+fi
+
+echo
+echo -e "${CYAN}============================================================${NC}"
+echo -e "${CYAN}  SERVER BERJALAN — Browser sudah dibuka otomatis${NC}"
+echo -e "${CYAN}============================================================${NC}"
+echo
+echo -e "  📱  Admin Dashboard: http://$LOCAL_IP:3000/admin"
+echo -e "  🎙️  Intercom (test): https://$LOCAL_IP:3443"
+echo
+echo -e "  💡  HP Kru buka: https://$LOCAL_IP:3443  (scan QR di admin)"
+echo -e "  💡  Tekan ${RED}[q]${NC} lalu ${GREEN}[Enter]${NC} di sini untuk menghentikan server"
+echo -e "${CYAN}============================================================${NC}"
+echo
+
 # Trap Ctrl+C dan cleanup
 cleanup() {
     echo

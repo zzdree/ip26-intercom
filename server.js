@@ -297,8 +297,46 @@ function broadcastPresence() {
 // ============================================================================
 // 4. WEBSOCKET HANDLERS
 // ============================================================================
+// Allowed origins for WebSocket connections (security)
+const ALLOWED_ORIGINS = new Set([
+    'http://localhost:3000',
+    'https://localhost:3443',
+    'http://127.0.0.1:3000',
+    'https://127.0.0.1:3443'
+]);
+
+function isOriginAllowed(origin) {
+    if (!origin) return false;
+    // Allow any origin from the same LAN IPs detected at startup
+    try {
+        const url = new URL(origin);
+        const hostname = url.hostname;
+        // Allow if origin hostname matches one of our detected LAN IPs
+        const interfaces = os.networkInterfaces();
+        for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+                if (iface.family === 'IPv4' && !iface.internal && iface.address === hostname) {
+                    return true;
+                }
+            }
+        }
+        // Also allow explicit allowed origins
+        return ALLOWED_ORIGINS.has(origin);
+    } catch (e) {
+        return ALLOWED_ORIGINS.has(origin);
+    }
+}
+
 function handleConnection(wss, secure) {
     wss.on('connection', (ws, req) => {
+        // Origin validation for security
+        const origin = req.headers.origin;
+        if (origin && !isOriginAllowed(origin)) {
+            console.log(`[!] Rejected connection from unauthorized origin: ${origin}`);
+            ws.close(4001, 'Origin not allowed');
+            return;
+        }
+
         const id = generateId();
         const ip = req.socket.remoteAddress;
         clients.set(id, {

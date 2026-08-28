@@ -88,8 +88,29 @@ echo.
 echo  [START] Menjalankan server... (tekan Q + Enter untuk berhenti)
 echo.
 
-REM Jalankan server di background, biarkan user stop pakai Q
+REM Jalankan server di background
 start "IP26-Intercom Server" cmd /k "node server.js"
+
+REM Tunggu sebentar supaya server siap
+timeout /t 2 /nobreak >nul
+
+REM Auto-buka browser ke Admin Dashboard & Intercom (test)
+echo  [INFO] Membuka browser...
+start "" "http://!LOCAL_IP!:3000/admin"
+start "" "https://!LOCAL_IP!:3443"
+
+echo.
+echo  ============================================================
+echo   SERVER BERJALAN — Browser sudah dibuka otomatis
+echo  ============================================================
+echo.
+echo   📱  Admin Dashboard: http://!LOCAL_IP!:3000/admin
+echo   🎙️  Intercom (test): https://!LOCAL_IP!:3443
+echo.
+echo   💡  HP Kru buka: https://!LOCAL_IP!:3443  (scan QR di admin)
+echo   💡  Tekan [Q] + [ENTER] di sini untuk menghentikan server
+echo  ============================================================
+echo.
 
 REM Tunggu input stop
 :STOP_LOOP
