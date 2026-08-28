@@ -19,22 +19,34 @@ echo  ============================================================
 echo.
 echo  [INFO] Memeriksa Node.js...
 
+REM Try multiple ways to find node.exe (cmd PATH can differ from bash)
 where node >nul 2>nul
 if errorlevel 1 (
-    echo  [ERROR] Node.js tidak ditemukan!
-    echo  Silakan install dari: https://nodejs.org (versi 18+)
-    echo.
-    pause
-    exit /b 1
+    REM Try common install locations
+    if exist "C:\Program Files\nodejs\node.exe" (
+        set NODE_PATH=C:\Program Files\nodejs\node.exe
+    ) else if exist "C:\Program Files (x86)\nodejs\node.exe" (
+        set NODE_PATH=C:\Program Files (x86)\nodejs\node.exe
+    ) else if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" (
+        set NODE_PATH=%LOCALAPPDATA%\Programs\nodejs\node.exe
+    ) else (
+        echo  [ERROR] Node.js tidak ditemukan!
+        echo  Silakan install dari: https://nodejs.org (versi 18+)
+        echo.
+        pause
+        exit /b 1
+    )
+) else (
+    set NODE_PATH=node
 )
 
-echo  [OK] Node.js ditemukan.
+echo  [OK] Node.js ditemukan: %NODE_PATH%.
 echo.
 
 REM Auto-install dependencies kalau belum ada
 if not exist "node_modules" (
-    echo  [SETUP] Menginstall dependensi (hanya sekali)... 
-    call npm install
+    echo  [SETUP] Menginstall dependensi (hanya sekali)...
+    call "%NODE_PATH%" npm install
     if errorlevel 1 (
         echo.
         echo  [ERROR] Gagal install dependensi.
@@ -89,7 +101,7 @@ echo  [START] Menjalankan server... (tekan Q + Enter untuk berhenti)
 echo.
 
 REM Jalankan server di background
-start "IP26-Intercom Server" cmd /k "node server.js"
+start "IP26-Intercom Server" cmd /k "%NODE_PATH% server.js"
 
 REM Tunggu sebentar supaya server siap
 timeout /t 2 /nobreak >nul
