@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="description" content="Dashboard admin intercom IP26 — monitoring kru produksi." />
+  <title>intercom IP26 — Admin</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E👑%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* Admin-specific layout (override style.css where needed) */
+    body.admin-body { background: #0a0a0a; min-height: 100vh; }
+    .admin-shell { display: grid; grid-template-columns: 1fr 320px; gap: 16px; max-width: 1400px; margin: 0 auto; padding: 16px; }
+    .admin-header { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; background: linear-gradient(135deg, #1a1a1a, #2a1810); border: 1px solid #3a2820; border-radius: 12px; }
+    .admin-header h1 { margin: 0; font-size: 18px; letter-spacing: 0.04em; }
+    .admin-stats { display: flex; gap: 12px; align-items: center; font-size: 13px; color: #aaa; }
+    .stat-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 999px; }
+    .stat-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b6b6b; }
+    .stat-pill.online .dot { background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: pulse 1.4s ease-in-out infinite; }
+    .stat-pill.speaking .dot { background: #f97316; box-shadow: 0 0 8px #f97316; animation: pulse 0.6s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    .admin-main { display: flex; flex-direction: column; gap: 16px; }
+    .admin-side { display: flex; flex-direction: column; gap: 16px; }
+    .card { background: #161616; border: 1px solid #2a2a2a; border-radius: 12px; overflow: hidden; }
+    .card-head { padding: 12px 16px; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; justify-content: space-between; }
+    .card-head h2, .card-head h3 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #ddd; }
+    .card-body { padding: 12px 16px; }
+    .peer-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; padding: 12px; }
+    .peer-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; transition: all 0.15s ease; }
+    .peer-card.speaking { border-color: #f97316; background: linear-gradient(135deg, #1a1a1a, #2a1810); box-shadow: 0 0 16px rgba(249, 115, 22, 0.2); }
+    .peer-avatar { width: 40px; height: 40px; border-radius: 50%; background: #2a2a2a; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+    .peer-card.speaking .peer-avatar { background: #f97316; color: #fff; }
+    .peer-info { flex: 1; min-width: 0; }
+    .peer-name { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .peer-role { font-size: 11px; color: #888; }
+    .peer-actions { display: flex; gap: 4px; }
+    .peer-actions button { background: transparent; border: 1px solid #2a2a2a; color: #888; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .peer-actions button:hover { color: #fff; border-color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+    .empty-state { padding: 32px; text-align: center; color: #666; font-size: 13px; }
+    .empty-state-icon { font-size: 32px; margin-bottom: 8px; opacity: 0.4; }
+    .log-list { max-height: 240px; overflow-y: auto; padding: 8px 12px; font-family: ui-monospace, monospace; font-size: 12px; }
+    .log-list .log-item { padding: 4px 0; border-bottom: 1px solid #1a1a1a; color: #888; display: flex; gap: 8px; }
+    .log-list .log-item .time { color: #555; flex-shrink: 0; }
+    .log-list .log-item.speak { color: #f97316; }
+    .log-list .log-item.silence { color: #4ade80; }
+    .log-list .log-item .who { color: #fff; }
+    .broadcast-form { display: flex; flex-direction: column; gap: 8px; }
+    .broadcast-form textarea { background: #0a0a0a; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px; color: #fff; font-family: inherit; font-size: 13px; resize: vertical; min-height: 60px; }
+    .broadcast-form button { background: linear-gradient(135deg, #f97316, #ea580c); border: none; color: #fff; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; }
+    .broadcast-form button:hover { background: linear-gradient(135deg, #ea580c, #c2410c); }
+    .broadcast-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .speaker-now { display: flex; align-items: center; gap: 12px; padding: 16px; background: linear-gradient(135deg, #1a1a1a, #2a1810); border: 1px solid #f97316; border-radius: 12px; min-height: 70px; }
+    .speaker-now.silent { background: #1a1a1a; border-color: #2a2a2a; }
+    .speaker-now .who-icon { font-size: 28px; }
+    .speaker-now .who-text { flex: 1; }
+    .speaker-now .who-text .name { font-size: 18px; font-weight: 600; color: #fff; }
+    .speaker-now .who-text .role { font-size: 12px; color: #888; }
+    .speaker-now .badge { background: #f97316; color: #fff; font-size: 11px; padding: 4px 10px; border-radius: 999px; font-weight: 600; letter-spacing: 0.05em; }
+    .speaker-now.silent .badge { background: #2a2a2a; color: #666; }
+    .admin-link { color: #888; text-decoration: none; font-size: 12px; }
+    .admin-link:hover { color: #fff; }
+    @media (max-width: 900px) { .admin-shell { grid-template-columns: 1fr; } .admin-side { order: -1; } }
+  </style>
+</head>
+<body class="admin-body">
+
+<div class="admin-shell">
+
+  <header class="admin-header">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span style="font-size: 24px;">👑</span>
+      <h1>intercom IP26 · Admin</h1>
+    </div>
+    <div class="admin-stats">
+      <span class="stat-pill online" id="statConn">
+        <span class="dot"></span>
+        <span id="statConnText">Menghubungkan</span>
+      </span>
+      <span class="stat-pill">
+        <span>👥</span>
+        <span><strong id="statCount">0</strong> kru</span>
+      </span>
+      <span class="stat-pill speaking" id="statSpeak" style="display: none;">
+        <span class="dot"></span>
+        <span>Live PTT</span>
+      </span>
+      <a href="intercom.html" class="admin-link">↗ Join sebagai kru</a>
+    </div>
+  </header>
+
+  <main class="admin-main">
+
+    <section class="card">
+      <header class="card-head">
+        <h2>🎤 Sedang Bicara</h2>
+      </header>
+      <div class="card-body">
+        <div class="speaker-now silent" id="speakerNow">
+          <span class="who-icon">🔇</span>
+          <div class="who-text">
+            <div class="name" id="speakerNowName">Tidak ada</div>
+            <div class="role" id="speakerNowRole">— standby —</div>
+          </div>
+          <span class="badge">IDLE</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header class="card-head">
+        <h2>👥 Kru Online (<span id="peerCount">0</span>)</h2>
+        <button class="admin-link" id="refreshBtn" style="background: none; border: 1px solid #2a2a2a; padding: 4px 10px; border-radius: 6px; cursor: pointer;">↻ Refresh</button>
+      </header>
+      <div class="peer-grid" id="peerGrid">
+        <div class="empty-state" style="grid-column: 1 / -1;">
+          <div class="empty-state-icon">📡</div>
+          <div>Belum ada kru yang join</div>
+          <small style="color: #555;">Buka <code>/intercom</code> di HP untuk join</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <header class="card-head">
+        <h2>📋 Log Aktivitas (PTT)</h2>
+        <button class="admin-link" id="clearLogBtn" style="background: none; border: 1px solid #2a2a2a; padding: 4px 10px; border-radius: 6px; cursor: pointer;">Clear</button>
+      </header>
+      <div class="log-list" id="logList">
+        <div class="log-item"><span class="time">--:--:--</span><span>Menunggu aktivitas kru...</span></div>
+      </div>
+    </section>
+
+  </main>
+
+  <aside class="admin-side">
+
+    <section class="card">
+      <header class="card-head"><h3>📣 Broadcast</h3></header>
+      <div class="card-body">
+        <form class="broadcast-form" id="broadcastForm">
+          <textarea id="broadcastText" placeholder="Pesan ke semua kru... (misal: 'Gladi bersih 5 menit lagi')" maxlength="200" required></textarea>
+          <button type="submit">📡 Kirim ke Semua Kru</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="card">
+      <header class="card-head"><h3>🔗 Quick Links</h3></header>
+      <div class="card-body" style="display: flex; flex-direction: column; gap: 8px;">
+        <a href="intercom.html" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">📱 /intercom (HP kru)</a>
+        <a href="index.html" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">🚪 / (Halaman masuk)</a>
+        <a href="/api/peers" target="_blank" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">🔌 /api/peers (JSON)</a>
+        <a href="/health" target="_blank" class="admin-link" style="padding: 8px 12px; background: #1a1a1a; border-radius: 8px; display: block;">💚 /health (status)</a>
+      </div>
+    </section>
+
+  </aside>
+
+</div>
+
+<div class="toast-stack" id="toastStack" aria-live="assertive"></div>
+
+<script src="admin.js"></script>
+</body>
+</html>

@@ -7,6 +7,7 @@
  *   1. Track siapa saja yang terhubung (presence)
  *   2. Tukar SDP offer/answer + ICE candidates antar peer
  *   3. Broadcast status PTT (siapa yang sedang bicara) ke semua kru
+ *   4. Admin API: list / kick / broadcast
  *
  * Jalankan:   npm install
  *             npm start
@@ -53,8 +54,52 @@ app.get('/health', (req, res) => {
         status: 'ok',
         uptime: process.uptime(),
         clients: clients.size,
-        version: '1.0.0'
+        version: '1.1.0'
     });
+});
+
+// Admin: lihat snapshot semua peer (untuk dashboard production lead)
+app.get('/api/peers', (req, res) => {
+    const list = [];
+    for (const [id, c] of clients) {
+        list.push({
+            id,
+            role: c.role || 'unregistered',
+            name: c.name || '—',
+            roleLabel: getRoleLabel(c.role),
+            speaking: c.speaking === true,
+            joinedAt: c.joinedAt,
+            lastSeen: c.lastSeen,
+            ip: c.ip
+        });
+    }
+    list.sort((a, b) => a.joinedAt - b.joinedAt);
+    res.json({ count: list.length, peers: list, serverTime: Date.now() });
+});
+
+// Admin: kick peer by id
+app.post('/api/kick', express.json(), (req, res) => {
+    const { id, reason } = req.body || {};
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const c = clients.get(id);
+    if (!c) return res.status(404).json({ ok: false, error: 'peer not found' });
+    const msg = { type: 'kicked', reason: String(reason || 'dikeluarkan oleh admin').slice(0, 200) };
+    safeSend(c.ws, msg);
+    try { c.ws.close(1000, 'kicked'); } catch (e) { /* ignore */ }
+    clients.delete(id);
+    broadcastPresence();
+    console.log(`[admin] kicked ${id} (${c.name || '?'} / ${c.role || '?'}) — reason: ${msg.reason}`);
+    res.json({ ok: true });
+});
+
+// Admin: broadcast system message ke semua kru
+app.post('/api/broadcast', express.json(), (req, res) => {
+    const { text } = req.body || {};
+    const t = String(text || '').trim().slice(0, 200);
+    if (!t) return res.status(400).json({ ok: false, error: 'text required' });
+    broadcast({ type: 'system', text: t });
+    console.log(`[admin] broadcast: ${t}`);
+    res.json({ ok: true, sent: clients.size });
 });
 
 // ============================================================================
@@ -331,7 +376,12 @@ server.listen(PORT, HOST, () => {
     console.log(`  Mode     : WebRTC mesh (P2P audio, signaling only)`);
     console.log(`  Maks     : 12 peer simultan (cocok untuk tim produksi)`);
     console.log('----------------------------------------------------------------');
-    console.log('  📡  Akses dari HP kru (pakai WiFi lokal yang sama):');
+    console.log('  📡  Akses dari device di WiFi lokal yang sama:');
+    console.log(`     📱 /intercom    — HP kru (PTT)`);
+    console.log(`     👑 /admin       — Dashboard production lead (laptop/desktop)`);
+    console.log(`     🔌 /api/peers   — JSON snapshot semua peer`);
+    console.log(`     💚 /health      — Server status`);
+    console.log('----------------------------------------------------------------');
     for (const { name, address } of ips) {
         console.log(`     → http://${address}:${PORT}    [${name}]`);
     }
