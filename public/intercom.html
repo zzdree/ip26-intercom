@@ -31,7 +31,7 @@
       <div class="speaker-empty" id="speakerEmpty">
         <div class="mic-icon" aria-hidden="true">🎙️</div>
         <p>Belum ada yang bicara</p>
-        <small>Tahan tombol di bawah untuk transmisi</small>
+        <small>Pilih mode &amp; gunakan tombol di bawah</small>
       </div>
 
       <div class="speaker-active hidden" id="speakerActive">
@@ -46,7 +46,22 @@
     </section>
 
     <section class="ptt-section">
-      <button id="pttButton" class="ptt-button" type="button" aria-label="Tahan untuk bicara">
+      <!-- Mode selector: pilih PTT (tahan) atau Mute Toggle (tap on/off) -->
+      <div class="mode-selector" role="tablist" aria-label="Pilih mode intercom">
+        <button id="modePttBtn" class="mode-chip active" type="button" role="tab" aria-selected="true" data-mode="ptt">
+          <span class="mode-icon" aria-hidden="true">📻</span>
+          <span class="mode-label">Push-to-Talk</span>
+          <span class="mode-sub">Tahan tombol</span>
+        </button>
+        <button id="modeMuteBtn" class="mode-chip" type="button" role="tab" aria-selected="false" data-mode="mute">
+          <span class="mode-icon" aria-hidden="true">🎙️</span>
+          <span class="mode-label">Mute Toggle</span>
+          <span class="mode-sub">Tap on/off</span>
+        </button>
+      </div>
+
+      <!-- Tombol utama: PTT (default, besar & hijau) -->
+      <button id="pttButton" class="ptt-button ptt-mode ptt-color-ptt" type="button" aria-label="Tahan untuk bicara">
         <div class="ptt-ring" aria-hidden="true"></div>
         <div class="ptt-inner">
           <div class="ptt-icon" aria-hidden="true">📻</div>
@@ -54,7 +69,18 @@
           <div class="ptt-hint">Tekan &amp; Tahan</div>
         </div>
       </button>
-      <div class="ptt-status" id="pttStatus" aria-live="polite">Siap</div>
+
+      <!-- Tombol Mute (toggle, besar & merah/oranye) -->
+      <button id="muteButton" class="ptt-button ptt-mode hidden ptt-color-mute" type="button" aria-label="Tap untuk mute/unmute">
+        <div class="ptt-ring" aria-hidden="true"></div>
+        <div class="ptt-inner">
+          <div class="ptt-icon" aria-hidden="true">🎙️</div>
+          <div class="ptt-label">MIC ON</div>
+          <div class="ptt-hint">Tap untuk matikan</div>
+        </div>
+      </button>
+
+      <div class="ptt-status" id="pttStatus" aria-live="polite">Siap · Mode PTT</div>
     </section>
 
     <section class="crew-panel">

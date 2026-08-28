@@ -4,17 +4,19 @@
  * Handles:
  *  - WebSocket signaling for presence + PTT state + WebRTC negotiation
  *  - WebRTC peer connections (one per remote peer, mesh topology)
- *  - Push-to-Talk button (mouse + touch)
+ *  - Two mic modes:
+ *      • PTT  — press and hold the button to transmit (default)
+ *      • MUTE — tap to toggle mic on/off (latch)
  *  - Audio routing (play remote streams through single <audio> element)
  *  - UI updates: speaker stage, crew list, connection status, toasts
  *
  * Audio flow:
- *   Local mic (getUserMedia) → ptt-button-controlled track.enabled
- *   → RTCPeerConnection tracks → remote peers hear us when PTT active
+ *   Local mic (getUserMedia) → tx-controlled track.enabled
+ *   → RTCPeerConnection tracks → remote peers hear us when our track is enabled
  *   ← RTCPeerConnection ontrack → <audio> element
  *
  * Important:
- *   - We never enable the local mic track until PTT is pressed (privacy)
+ *   - We never enable the local mic track until the user triggers PTT/mute-on
  *   - All peers are full-mesh, works for ≤ 8-10 simultaneous users fine
  * -----------------------------------------------------------------------------
  */
@@ -31,12 +33,14 @@
   let localStream = null;
   let localAudioTrack = null;
 
-  // Map<peerId, { pc, role, name, iceCandidateQueue }>
+  // Map<peerId, { pc, role, name }>
   const peers = new Map();
-  const remoteStreams = new Map();   // Map<peerId, MediaStream>
+  const remoteStreams = new Map();
 
-  let pttActive = false;
-  let pttHoldRegistered = false;     // safety: only one hold at a time
+  // Transmission state — single source of truth
+  let txActive = false;              // are we currently sending audio?
+  let txMode = 'ptt';                // 'ptt' (hold) or 'mute' (toggle)
+
   let reconnectAttempts = 0;
   const MAX_RECONNECT_DELAY = 15000;
 
@@ -64,10 +68,16 @@
     speakerRole: $('speakerRole'),
     speakerName: $('speakerName'),
 
+    modePttBtn: $('modePttBtn'),
+    modeMuteBtn: $('modeMuteBtn'),
+
     pttButton: $('pttButton'),
+    muteButton: $('muteButton'),
     pttStatus: $('pttStatus'),
     pttLabel: $('pttButton').querySelector('.ptt-label'),
     pttHint: $('pttButton').querySelector('.ptt-hint'),
+    muteLabel: $('muteButton').querySelector('.ptt-label'),
+    muteHint: $('muteButton').querySelector('.ptt-hint'),
 
     crewCount: $('crewCount'),
     crewList: $('crewList'),
@@ -102,352 +112,78 @@
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
 
-    // Setup PTT events
+    // Read preferred mode from sessionStorage or default to PTT
+    try {
+      const saved = sessionStorage.getItem('intercom-mode');
+      if (saved === 'mute' || saved === 'ptt') txMode = saved;
+    } catch (e) { /* ignore */ }
+
+    setupModeSelector();
     setupPTT();
+    setupMute();
 
-    // Setup leave button
-    document.getElementById('leaveBtn').addEventListener('click', (e) => {
-      e.preventDefault();
-      cleanup();
-      window.location.href = 'index.html';
-    });
+    // Start in selected mode (silent = no toast)
+    applyMode(txMode, true);
 
-    // Start connection
-    connect();
-
-    // Prevent page from sleeping during PTT (wake lock when supported)
-    setupWakeLock();
-
-    // Visibility change → reconnect if hidden too long
+    // Page Visibility: kalau user pindah tab saat PTT, lepas transmisi
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && (!ws || ws.readyState !== WebSocket.OPEN)) {
-        connect();
-      }
+      if (document.hidden && txActive && txMode === 'ptt') stopTx();
     });
   }
 
   // ============================================================================
-  // WEBSOCKET CONNECTION
+  // MODE SELECTOR
   // ============================================================================
 
-  function connect() {
-    if (ws && ws.readyState === WebSocket.OPEN) return;
-    setConnectionState('connecting', 'Menghubungkan...');
-
-    const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${location.host}/ws`;
-
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch (err) {
-      setConnectionState('error', 'Gagal konek');
-      scheduleReconnect();
-      return;
-    }
-
-    ws.onopen = () => {
-      reconnectAttempts = 0;
-      setConnectionState('connected', 'Terhubung');
-      // Re-register our identity
-      ws.send(JSON.stringify({
-        type: 'register',
-        role: identity.role,
-        name: identity.name
-      }));
-      toast('Koneksi tersambung', 'success', 2000);
-    };
-
-    ws.onmessage = (event) => {
-      let msg;
-      try { msg = JSON.parse(event.data); } catch (e) { return; }
-      handleSignalingMessage(msg);
-    };
-
-    ws.onerror = () => {
-      // error event will be followed by close
-    };
-
-    ws.onclose = () => {
-      setConnectionState('error', 'Terputus');
-      scheduleReconnect();
-    };
+  function setupModeSelector() {
+    dom.modePttBtn.addEventListener('click', () => applyMode('ptt'));
+    dom.modeMuteBtn.addEventListener('click', () => applyMode('mute'));
   }
 
-  function scheduleReconnect() {
-    if (reconnectAttempts >= 8) {
-      toast('Koneksi gagal. Refresh halaman.', 'error', 6000);
-      return;
-    }
-    const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
-    reconnectAttempts++;
-    setTimeout(connect, delay);
-  }
+  function applyMode(mode, silent) {
+    if (mode !== 'ptt' && mode !== 'mute') return;
 
-  function sendSignaling(msg) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(msg));
-    }
+    // If currently transmitting, stop first
+    if (txActive) stopTx();
+
+    txMode = mode;
+
+    // Toggle chip styles
+    const isPtt = mode === 'ptt';
+    dom.modePttBtn.classList.toggle('active', isPtt);
+    dom.modeMuteBtn.classList.toggle('active', !isPtt);
+    dom.modePttBtn.setAttribute('aria-selected', isPtt ? 'true' : 'false');
+    dom.modeMuteBtn.setAttribute('aria-selected', !isPtt ? 'true' : 'false');
+
+    // Toggle which big button is visible
+    dom.pttButton.classList.toggle('hidden', !isPtt);
+    dom.muteButton.classList.toggle('hidden', isPtt);
+
+    // Update status text
+    dom.pttStatus.textContent = isPtt ? 'Siap · Mode PTT' : 'Siap · Mode Mute';
+    dom.pttStatus.classList.remove('transmitting');
+
+    // Persist preference for next session
+    try { sessionStorage.setItem('intercom-mode', mode); } catch (e) { /* ignore */ }
   }
 
   // ============================================================================
-  // SIGNALING MESSAGE HANDLER
-  // ============================================================================
-
-  function handleSignalingMessage(msg) {
-    switch (msg.type) {
-
-      case 'hello': {
-        // server assigned us an id — update identity
-        if (msg.id) {
-          identity.id = msg.id;
-        }
-        break;
-      }
-
-      case 'presence': {
-        renderCrewList(msg.users || []);
-        break;
-      }
-
-      case 'peer-list': {
-        // We're a newcomer — make offers to all existing peers
-        (msg.peers || []).forEach(p => ensurePeer(p, true));
-        break;
-      }
-
-      case 'new-peer': {
-        // An existing peer should make the offer to us
-        ensurePeer(msg.peer, false);
-        break;
-      }
-
-      case 'signal': {
-        handleRTCSignal(msg);
-        break;
-      }
-
-      case 'ptt-state': {
-        renderSpeaker(msg);
-        // Also update crew list to show "speaking" badge
-        markPeerSpeaking(msg.from, msg.state === 'on');
-        break;
-      }
-
-      case 'error': {
-        toast(msg.error || 'Server error', 'error', 4000);
-        break;
-      }
-
-      case 'server-shutdown': {
-        toast('Server dimatikan oleh admin', 'error', 5000);
-        break;
-      }
-    }
-  }
-
-  // ============================================================================
-  // WEBRTC PEER MANAGEMENT
-  // ============================================================================
-
-  function getRTCConfig() {
-    return {
-      iceServers: [
-        // Public STUN servers (free, for NAT traversal on home/LAN networks)
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-
-        // TURN server (free tier, public). Needed when WiFi has client-isolation
-        // (e.g. unnes-id campus WiFi where devices cannot talk peer-to-peer).
-        // TURN relays audio through a public server, so PTT still works.
-        // ----------------------------------------------------------------------
-        // NOTE: For a free, real TURN server, register at https://www.metered.ca/stun-turn
-        // (free 500GB/mo) and replace the credentials below.
-        // If these don't work at the venue, use a dedicated HP-hotspot WiFi
-        // instead (no TURN needed).
-        // ----------------------------------------------------------------------
-        {
-          urls: 'turn:global.turn.metered.ca:80',
-          username: 'e7f3a4b2c1d9e8f6a5b4c3d2e1f0a9b8',
-          credential: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'
-        },
-        {
-          urls: 'turn:global.turn.metered.ca:443',
-          username: 'e7f3a4b2c1d9e8f6a5b4c3d2e1f0a9b8',
-          credential: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'
-        }
-      ],
-      iceTransportPolicy: 'all',  // try direct first, fall back to TURN
-      bundlePolicy: 'max-bundle',
-      rtcpMuxPolicy: 'require'
-    };
-  }
-
-  async function ensurePeer(peer, isInitiator) {
-    if (!peer || !peer.id) return;
-    if (peer.id === identity.id) return; // don't connect to self
-    if (peers.has(peer.id)) {
-      // Update metadata only
-      const p = peers.get(peer.id);
-      p.role = peer.role;
-      p.name = peer.name;
-      return;
-    }
-
-    console.log(`[rtc] ensurePeer ${peer.id} (${peer.role}) initiator=${isInitiator}`);
-
-    const pc = new RTCPeerConnection(getRTCConfig());
-
-    // Add our local audio track (if we have one) — track will be disabled until PTT
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
-      });
-    }
-
-    const peerEntry = {
-      pc,
-      role: peer.role,
-      name: peer.name,
-      iceCandidateQueue: []
-    };
-    peers.set(peer.id, peerEntry);
-
-    // ICE candidates
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        sendSignaling({
-          type: 'signal',
-          target: peer.id,
-          signal: { type: 'ice', candidate: e.candidate }
-        });
-      }
-    };
-
-    // Remote track — play through single <audio> element
-    pc.ontrack = (e) => {
-      console.log(`[rtc] remote track from ${peer.id}`);
-      let stream = e.streams[0];
-      if (!stream) {
-        // Some browsers split — build one
-        stream = new MediaStream();
-        stream.addTrack(e.track);
-      }
-      remoteStreams.set(peer.id, stream);
-      attachRemoteAudio();
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log(`[rtc] ${peer.id} state: ${pc.connectionState}`);
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        cleanupPeer(peer.id);
-      }
-    };
-
-    // If we are the initiator (newcomer), create the offer
-    if (isInitiator) {
-      try {
-        const offer = await pc.createOffer({ offerToReceiveAudio: true });
-        await pc.setLocalDescription(offer);
-        sendSignaling({
-          type: 'signal',
-          target: peer.id,
-          signal: { type: 'sdp', sdp: pc.localDescription }
-        });
-      } catch (err) {
-        console.error('[rtc] createOffer failed:', err);
-      }
-    }
-  }
-
-  async function handleRTCSignal(msg) {
-    if (!msg.from || !msg.signal) return;
-
-    // Ensure we have a peer entry; if not, the new-peer event might race —
-    // create as passive (non-initiator) and let us receive an offer.
-    if (!peers.has(msg.from)) {
-      await ensurePeer({ id: msg.from, role: msg.fromRole, name: msg.fromName }, false);
-    }
-
-    const peerEntry = peers.get(msg.from);
-    if (!peerEntry) return;
-    const pc = peerEntry.pc;
-
-    try {
-      if (msg.signal.type === 'sdp') {
-        const desc = msg.signal.sdp;
-        if (desc.type === 'offer') {
-          await pc.setRemoteDescription(desc);
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          sendSignaling({
-            type: 'signal',
-            target: msg.from,
-            signal: { type: 'sdp', sdp: pc.localDescription }
-          });
-        } else if (desc.type === 'answer') {
-          await pc.setRemoteDescription(desc);
-        }
-        // Flush any queued ICE candidates
-        while (peerEntry.iceCandidateQueue.length > 0) {
-          const cand = peerEntry.iceCandidateQueue.shift();
-          try { await pc.addIceCandidate(cand); } catch (e) { /* ignore */ }
-        }
-      } else if (msg.signal.type === 'ice') {
-        if (!pc.remoteDescription) {
-          // Queue until SDP is set
-          peerEntry.iceCandidateQueue.push(msg.signal.candidate);
-        } else {
-          try {
-            await pc.addIceCandidate(msg.signal.candidate);
-          } catch (e) { /* ignore */ }
-        }
-      }
-    } catch (err) {
-      console.error('[rtc] signal handling error:', err);
-    }
-  }
-
-  function attachRemoteAudio() {
-    // Combine all remote streams into one and play through single <audio>
-    const combined = new MediaStream();
-    for (const stream of remoteStreams.values()) {
-      stream.getTracks().forEach(t => combined.addTrack(t));
-    }
-    if (combined.getTracks().length === 0) return;
-    dom.remoteAudio.srcObject = combined;
-    dom.remoteAudio.play().catch(e => {
-      console.warn('[audio] autoplay blocked:', e);
-    });
-  }
-
-  function cleanupPeer(peerId) {
-    const peer = peers.get(peerId);
-    if (peer) {
-      try { peer.pc.close(); } catch (e) { /* ignore */ }
-    }
-    peers.delete(peerId);
-    remoteStreams.delete(peerId);
-    attachRemoteAudio();
-  }
-
-  // ============================================================================
-  // PUSH-TO-TALK
+  // PUSH-TO-TALK (hold to transmit)
   // ============================================================================
 
   function setupPTT() {
     const btn = dom.pttButton;
 
-    // Press handlers
     const pressStart = (e) => {
       e.preventDefault();
-      if (pttActive) return;
-      startPTT();
+      if (txActive) return;
+      startTx();
     };
 
     const pressEnd = (e) => {
       e.preventDefault();
-      if (!pttActive) return;
-      stopPTT();
+      if (!txActive) return;
+      stopTx();
     };
 
     // Touch events (mobile)
@@ -462,28 +198,62 @@
 
     // Keyboard: hold space to talk (handy for testing on laptop)
     document.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && !e.repeat && !pttActive &&
+      if (txMode !== 'ptt') return;
+      if (e.code === 'Space' && !e.repeat && !txActive &&
           document.activeElement?.tagName !== 'INPUT' &&
           document.activeElement?.tagName !== 'TEXTAREA') {
         e.preventDefault();
-        startPTT();
+        startTx();
       }
     });
     document.addEventListener('keyup', (e) => {
-      if (e.code === 'Space' && pttActive) {
+      if (txMode !== 'ptt') return;
+      if (e.code === 'Space' && txActive) {
         e.preventDefault();
-        stopPTT();
+        stopTx();
       }
     });
 
     // Global safety: if we lose focus while transmitting, stop
     window.addEventListener('blur', () => {
-      if (pttActive) stopPTT();
+      if (txActive && txMode === 'ptt') stopTx();
     });
   }
 
-  async function startPTT() {
-    if (pttActive) return;
+  // ============================================================================
+  // MUTE TOGGLE (tap on / tap off)
+  // ============================================================================
+
+  function setupMute() {
+    const btn = dom.muteButton;
+
+    const toggle = (e) => {
+      e.preventDefault();
+      if (txActive) {
+        stopTx();
+      } else {
+        startTx();
+      }
+    };
+
+    btn.addEventListener('click', toggle);
+    // Use touchend for snappier mobile feel; click is fallback
+    btn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (txActive) {
+        stopTx();
+      } else {
+        startTx();
+      }
+    }, { passive: false });
+  }
+
+  // ============================================================================
+  // UNIFIED TX START/STOP (used by both PTT and Mute)
+  // ============================================================================
+
+  async function startTx() {
+    if (txActive) return;
 
     // First-time: get mic
     if (!localStream) {
@@ -493,7 +263,6 @@
             echoCancellation: true,
             noiseSuppression: true,
             autoGainControl: true,
-            // High quality for voice
             sampleRate: 48000,
             channelCount: 1
           },
@@ -502,7 +271,7 @@
         localAudioTrack = localStream.getAudioTracks()[0];
         localAudioTrack.enabled = false; // MUTED by default
 
-        // Now add to existing peer connections
+        // Add to existing peer connections
         for (const [, peerEntry] of peers) {
           const sender = peerEntry.pc.getSenders().find(s => s.track && s.track.kind === 'audio');
           if (sender) {
@@ -518,13 +287,20 @@
       }
     }
 
-    pttActive = true;
+    txActive = true;
     if (localAudioTrack) localAudioTrack.enabled = true;
 
-    // UI
-    dom.pttButton.classList.add('active');
-    dom.pttLabel.textContent = 'TRANSMIT';
-    dom.pttHint.textContent = 'Lepaskan untuk selesai';
+    // Update UI for both buttons (only the visible one is rendered)
+    if (txMode === 'ptt') {
+      dom.pttButton.classList.add('active');
+      dom.pttLabel.textContent = 'TRANSMIT';
+      dom.pttHint.textContent = 'Lepaskan untuk selesai';
+    } else {
+      dom.muteButton.classList.add('active');
+      dom.muteLabel.textContent = 'MIC OFF';
+      dom.muteHint.textContent = 'Tap untuk matikan / nyalakan';
+    }
+
     dom.pttStatus.textContent = '● Mengirim...';
     dom.pttStatus.classList.add('transmitting');
 
@@ -546,16 +322,21 @@
     acquireWakeLock();
   }
 
-  function stopPTT() {
-    if (!pttActive) return;
-    pttActive = false;
+  function stopTx() {
+    if (!txActive) return;
+    txActive = false;
     if (localAudioTrack) localAudioTrack.enabled = false;
 
-    // UI
+    // Reset both button UIs (only the visible one matters)
     dom.pttButton.classList.remove('active');
     dom.pttLabel.textContent = 'Tahan Untuk Bicara';
     dom.pttHint.textContent = 'Tekan & Tahan';
-    dom.pttStatus.textContent = 'Siap';
+
+    dom.muteButton.classList.remove('active');
+    dom.muteLabel.textContent = 'MIC ON';
+    dom.muteHint.textContent = 'Tap untuk matikan';
+
+    dom.pttStatus.textContent = txMode === 'ptt' ? 'Siap · Mode PTT' : 'Siap · Mode Mute';
     dom.pttStatus.classList.remove('transmitting');
 
     // Clear our own speaking display
@@ -578,7 +359,6 @@
   }
 
   function renderSpeaker(msg) {
-    // If our own id → don't double-render
     if (msg.from === identity.id) return;
     if (msg.state === 'on') {
       dom.speakerEmpty.classList.add('hidden');
@@ -592,7 +372,6 @@
   }
 
   function clearSpeakerIfSelf() {
-    // If our own id is shown, hide it
     dom.speakerEmpty.classList.remove('hidden');
     dom.speakerActive.classList.add('hidden');
   }
@@ -604,7 +383,6 @@
   }
 
   function getCurrentCrew() {
-    // Last known crew from server. Cached in lastPresenceUsers.
     return lastPresenceUsers || [];
   }
 
@@ -619,49 +397,45 @@
         id: identity.id,
         role: identity.role,
         name: identity.name,
-        roleLabel: ROLE_LABELS[identity.role] || identity.role,
-        speaking: pttActive
+        self: true,
+        speaking: false
       }];
-    } else {
-      // Update own speaking flag
-      selfEntry.speaking = pttActive;
     }
 
-    const totalKru = users.length;
-    const speakers = users.filter(u => u.speaking).length;
-    const otherCount = users.filter(u => u.id !== identity.id).length;
-
-    dom.crewCount.textContent = totalKru;
+    dom.crewCount.textContent = users.length;
 
     if (users.length === 0) {
       dom.crewList.innerHTML = '<li class="crew-empty">Belum ada kru lain yang join.</li>';
       return;
     }
 
-    // Build rows
-    const html = users.map(u => {
-      const isSelf = u.id === identity.id;
-      const speaking = u.speaking === true;
-      const role = ROLE_LABELS[u.role] || u.role || '—';
-      let badge = '';
-      if (speaking && isSelf) badge = '<span class="crew-speaking-badge">TX</span>';
-      else if (speaking) badge = '<span class="crew-speaking-badge">SPEAK</span>';
-      else if (isSelf) badge = '<span class="crew-you-badge">YOU</span>';
+    const roleOrder = ['production', 'switcher', 'audio', 'cam1', 'cam2', 'cam3', 'cam4', 'ppt1', 'ppt2', 'timekeeper', 'other'];
+    users.sort((a, b) => {
+      if (a.id === identity.id) return -1;
+      if (b.id === identity.id) return 1;
+      if (a.speaking && !b.speaking) return -1;
+      if (!a.speaking && b.speaking) return 1;
+      return (roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role));
+    });
 
+    const html = users.map(u => {
+      const isMe = u.id === identity.id;
+      const speaking = u.speaking || (isMe && txActive);
       return `
-        <li class="${speaking ? 'speaking' : ''}" data-id="${u.id}">
-          <span class="crew-role">${escapeHtml(role)}</span>
-          <span class="crew-name">${escapeHtml(u.name || 'Anonim')}</span>
-          ${badge}
+        <li class="${speaking ? 'speaking' : ''} ${isMe ? 'me' : ''}">
+          <span class="crew-role">${ROLE_LABELS[u.role] || u.role || '—'}</span>
+          <span class="crew-name">${escapeHtml(u.name || 'Anonim')}${isMe ? ' (kamu)' : ''}</span>
+          <span class="crew-state" aria-label="${speaking ? 'sedang bicara' : 'diam'}">
+            ${speaking ? '🎙️' : ''}
+          </span>
         </li>
       `;
     }).join('');
-
     dom.crewList.innerHTML = html;
   }
 
-  function escapeHtml(str) {
-    return String(str)
+  function escapeHtml(s) {
+    return String(s)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -669,64 +443,246 @@
       .replace(/'/g, '&#39;');
   }
 
-  // ============================================================================
-  // TOAST NOTIFICATIONS
-  // ============================================================================
-
-  function toast(text, kind = 'info', duration = 3000) {
+  function toast(message, type = 'info', duration = 3000) {
     const el = document.createElement('div');
-    el.className = `toast ${kind}`;
-    el.textContent = text;
+    el.className = `toast toast-${type}`;
+    el.textContent = message;
     dom.toastStack.appendChild(el);
     setTimeout(() => {
-      el.classList.add('fade-out');
-      setTimeout(() => el.remove(), 240);
+      el.classList.add('toast-leaving');
+      setTimeout(() => el.remove(), 300);
     }, duration);
   }
 
   // ============================================================================
-  // WAKE LOCK (prevent screen sleep during event)
+  // WAKE LOCK
   // ============================================================================
+
   let wakeLock = null;
   async function acquireWakeLock() {
-    if (!('wakeLock' in navigator)) return;
-    if (wakeLock) return;
     try {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => { wakeLock = null; });
-    } catch (e) { /* ignore */ }
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (err) {
+      // Wake lock may be denied — that's OK
+    }
   }
+
   function releaseWakeLock() {
     if (wakeLock) {
-      try { wakeLock.release(); } catch (e) { /* ignore */ }
+      wakeLock.release().catch(() => {});
       wakeLock = null;
     }
   }
 
   // ============================================================================
-  // CLEANUP
+  // SIGNALING
   // ============================================================================
 
-  function cleanup() {
-    if (ws) {
-      try { ws.close(); } catch (e) { /* ignore */ }
-    }
-    for (const [id] of peers) cleanupPeer(id);
-    if (localStream) {
-      localStream.getTracks().forEach(t => t.stop());
-    }
-    releaseWakeLock();
+  function connectWebSocket() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${location.host}/ws?role=${identity.role}&name=${encodeURIComponent(identity.name)}&id=${identity.id}`;
+
+    ws = new WebSocket(wsUrl);
+
+    ws.addEventListener('open', () => {
+      reconnectAttempts = 0;
+      setConnectionState('connected', 'Terhubung');
+    });
+
+    ws.addEventListener('message', async (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch (e) {
+        return;
+      }
+
+      switch (msg.type) {
+        case 'peer-list':
+          handlePeerList(msg.peers);
+          break;
+        case 'new-peer':
+          await createPeerConnection(msg.peer);
+          break;
+        case 'peer-left':
+          handlePeerLeft(msg.peerId);
+          break;
+        case 'signal':
+          await handleSignal(msg.from, msg.data);
+          break;
+        case 'ptt-state':
+          handlePttState(msg);
+          break;
+        case 'presence':
+          renderCrewList(msg.users);
+          break;
+        case 'error':
+          toast(msg.message || 'Terjadi kesalahan', 'error');
+          break;
+        case 'server-shutdown':
+          toast('Server dimatikan', 'error', 5000);
+          break;
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      setConnectionState('connecting', 'Memutus...');
+      scheduleReconnect();
+    });
+
+    ws.addEventListener('error', () => {
+      setConnectionState('error', 'Gagal');
+    });
   }
 
-  window.addEventListener('beforeunload', cleanup);
+  function scheduleReconnect() {
+    reconnectAttempts++;
+    const delay = Math.min(1000 * Math.pow(1.5, reconnectAttempts), MAX_RECONNECT_DELAY);
+    setTimeout(() => {
+      if (ws && ws.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
+      }
+    }, delay);
+  }
+
+  function sendSignaling(msg) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(msg));
+    }
+  }
+
+  // ============================================================================
+  // WEBRTC PEER CONNECTIONS
+  // ============================================================================
+
+  const ICE_CONFIG = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      // NOTE: TURN credentials below are placeholders for the demo.
+      // For real cross-network use, register at https://www.metered.ca/stun-turn
+      // and replace with real credentials. On the same LAN (e.g. unnes-id,
+      // WiFi kos, hotspot), STUN alone is enough — TURN only needed if
+      // client isolation blocks direct peer-to-peer traffic.
+      {
+        urls: 'turn:global.turn.metered.ca:80',
+        username: 'e7f3a4b2c1d9e8f6a5b4c3d2e1f0a9b8',
+        credential: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'
+      },
+      {
+        urls: 'turn:global.turn.metered.ca:443',
+        username: 'e7f3a4b2c1d9e8f6a5b4c3d2e1f0a9b8',
+        credential: 'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6'
+      }
+    ],
+    iceCandidatePoolSize: 10
+  };
+
+  function handlePeerList(peerList) {
+    for (const peer of peerList) {
+      createPeerConnection(peer);
+    }
+  }
+
+  async function createPeerConnection(peer) {
+    if (peers.has(peer.id)) return;
+
+    const pc = new RTCPeerConnection(ICE_CONFIG);
+    const peerEntry = { pc, role: peer.role, name: peer.name };
+    peers.set(peer.id, peerEntry);
+
+    if (localAudioTrack && localStream) {
+      pc.addTrack(localAudioTrack, localStream);
+    }
+
+    pc.addEventListener('icecandidate', (event) => {
+      if (event.candidate) {
+        sendSignaling({
+          type: 'signal',
+          to: peer.id,
+          data: { candidate: event.candidate }
+        });
+      }
+    });
+
+    pc.addEventListener('track', (event) => {
+      const [stream] = event.streams;
+      if (stream) {
+        remoteStreams.set(peer.id, stream);
+        if (dom.remoteAudio.srcObject !== stream) {
+          dom.remoteAudio.srcObject = stream;
+        }
+      }
+    });
+
+    pc.addEventListener('connectionstatechange', () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        handlePeerLeft(peer.id);
+      }
+    });
+
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      sendSignaling({
+        type: 'signal',
+        to: peer.id,
+        data: { sdp: pc.localDescription }
+      });
+    } catch (err) {
+      console.error('[webrtc] createOffer failed:', err);
+    }
+  }
+
+  async function handleSignal(fromId, data) {
+    let peerEntry = peers.get(fromId);
+    if (!peerEntry) return;
+    const pc = peerEntry.pc;
+
+    if (data.sdp) {
+      await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+      if (data.sdp.type === 'offer') {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignaling({
+          type: 'signal',
+          to: fromId,
+          data: { sdp: pc.localDescription }
+        });
+      }
+    } else if (data.candidate) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+      } catch (err) {
+        console.error('[webrtc] addIceCandidate failed:', err);
+      }
+    }
+  }
+
+  function handlePeerLeft(peerId) {
+    const peerEntry = peers.get(peerId);
+    if (peerEntry) {
+      try { peerEntry.pc.close(); } catch (e) {}
+      peers.delete(peerId);
+    }
+    if (remoteStreams.has(peerId)) {
+      remoteStreams.delete(peerId);
+    }
+  }
+
+  function handlePttState(msg) {
+    const updated = lastPresenceUsers.map(u => ({
+      ...u,
+      speaking: u.id === msg.from
+    }));
+    renderCrewList(updated);
+  }
 
   // ============================================================================
   // BOOT
   // ============================================================================
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
 
+  document.addEventListener('DOMContentLoaded', init);
 })();

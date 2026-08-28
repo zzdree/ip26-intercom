@@ -35,6 +35,14 @@
   --accent-green: #4caf50;
   --accent-yellow: #ffc107;
 
+  /* Mode-specific colors */
+  --ptt-color: #10b981;          /* emerald-500 */
+  --ptt-color-hot: #059669;      /* emerald-600 */
+  --ptt-glow: rgba(16, 185, 129, 0.4);
+  --mute-color: #f59e0b;         /* amber-500 */
+  --mute-color-hot: #d97706;     /* amber-600 */
+  --mute-glow: rgba(245, 158, 11, 0.4);
+
   --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.4);
   --shadow-deep: 0 16px 48px rgba(0, 0, 0, 0.6);
 
@@ -69,6 +77,11 @@
 
   --accent: #00838f;
   --accent-hot: #d32f2f;
+
+  --ptt-color: #059669;
+  --ptt-color-hot: #047857;
+  --mute-color: #d97706;
+  --mute-color-hot: #b45309;
 
   --shadow-soft: 0 8px 24px rgba(80, 60, 40, 0.12);
   --shadow-deep: 0 16px 48px rgba(80, 60, 40, 0.18);
@@ -527,7 +540,7 @@ a:focus:not(:focus-visible) {
   justify-content: center;
   padding: 24px 16px;
   position: relative;
-  min-height: 200px;
+  min-height: 180px;
 }
 
 .speaker-empty {
@@ -625,23 +638,83 @@ a:focus:not(:focus-visible) {
   margin-top: 8px;
 }
 
-/* ---------- PTT button ---------- */
+/* ---------- Mode selector ---------- */
+.mode-selector {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.mode-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  background: var(--bg-elev-2);
+  border: 1.5px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.mode-chip .mode-icon {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.mode-chip .mode-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.mode-chip .mode-sub {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.mode-chip:hover {
+  background: var(--bg-elev-3);
+  border-color: var(--border-default);
+  transform: translateY(-1px);
+}
+
+.mode-chip:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.mode-chip.active {
+  background: var(--bg-elev-3);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(77, 208, 225, 0.18);
+}
+
+.mode-chip.active .mode-label {
+  color: var(--accent);
+}
+
+/* ---------- PTT / Mute button (giant, colorful) ---------- */
 .ptt-section {
   padding: 8px 16px 16px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 
+/* Base styling for both PTT and Mute buttons */
 .ptt-button {
   position: relative;
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
-  background: var(--bg-elev-2);
-  border: 2px solid var(--border-default);
-  color: var(--text-primary);
+  width: 100%;
+  max-width: 320px;
+  height: 140px;
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -650,80 +723,123 @@ a:focus:not(:focus-visible) {
   user-select: none;
   -webkit-touch-callout: none;
   touch-action: none;
+  color: white;
+  font-weight: 800;
+  text-align: center;
+  overflow: hidden;
+  background: var(--bg-elev-2);
+  border: 3px solid var(--border-default);
 }
 
 .ptt-ring {
   position: absolute;
   inset: -6px;
-  border-radius: 50%;
+  border-radius: var(--radius-lg);
   border: 2px solid transparent;
   transition: all 200ms ease;
+  pointer-events: none;
 }
 
 .ptt-inner {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   pointer-events: none;
+  z-index: 1;
 }
 
 .ptt-icon {
   font-size: 56px;
   line-height: 1;
-  margin-bottom: 6px;
-  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.2));
+  margin-bottom: 4px;
+  filter: drop-shadow(0 4px 8px rgba(0,0,0,0.3));
 }
 
 .ptt-label {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 800;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 .ptt-hint {
-  font-size: 10.5px;
-  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
   letter-spacing: 0.04em;
 }
 
-.ptt-button:hover {
-  background: var(--bg-elev-3);
-  transform: scale(1.02);
+/* PTT color theme (emerald/green) */
+.ptt-color-ptt {
+  background: linear-gradient(135deg, var(--ptt-color), var(--ptt-color-hot));
+  border-color: var(--ptt-color);
+  box-shadow: 0 6px 20px var(--ptt-glow);
 }
 
+.ptt-color-ptt:hover {
+  background: linear-gradient(135deg, var(--ptt-color-hot), var(--ptt-color));
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px var(--ptt-glow);
+}
+
+/* Mute color theme (amber/orange) */
+.ptt-color-mute {
+  background: linear-gradient(135deg, var(--mute-color), var(--mute-color-hot));
+  border-color: var(--mute-color);
+  box-shadow: 0 6px 20px var(--mute-glow);
+}
+
+.ptt-color-mute:hover {
+  background: linear-gradient(135deg, var(--mute-color-hot), var(--mute-color));
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px var(--mute-glow);
+}
+
+/* Active state (when transmitting) */
 .ptt-button.active {
-  background: var(--accent-hot);
-  border-color: var(--accent-hot);
-  color: white;
-  transform: scale(1.05);
-  box-shadow: 0 0 0 8px rgba(255, 82, 82, 0.2), 0 0 40px rgba(255, 82, 82, 0.4);
+  transform: scale(1.03);
+}
+
+.ptt-color-ptt.active {
+  background: linear-gradient(135deg, #34d399, #10b981);
+  border-color: #6ee7b7;
+  box-shadow: 0 0 0 12px rgba(16, 185, 129, 0.18), 0 0 60px var(--ptt-glow);
+}
+
+.ptt-color-mute.active {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  border-color: #fcd34d;
+  box-shadow: 0 0 0 12px rgba(245, 158, 11, 0.18), 0 0 60px var(--mute-glow);
 }
 
 .ptt-button.active .ptt-ring {
-  border-color: var(--accent-hot);
+  border-color: rgba(255, 255, 255, 0.6);
   animation: ringPulse 1s ease-out infinite;
 }
 
 @keyframes ringPulse {
   0% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1.2); opacity: 0; }
+  100% { transform: scale(1.15); opacity: 0; }
 }
 
-.ptt-button.active .ptt-hint { color: rgba(255, 255, 255, 0.85); }
+.ptt-button:active {
+  transform: scale(0.98);
+}
 
 .ptt-status {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-tertiary);
   text-align: center;
-  font-weight: 500;
-  min-height: 18px;
+  font-weight: 600;
+  min-height: 20px;
+  letter-spacing: 0.02em;
 }
 
 .ptt-status.transmitting {
   color: var(--accent-hot);
   font-weight: 700;
+  animation: blink 1s ease-in-out infinite;
 }
 
 /* ---------- Crew panel ---------- */
@@ -801,104 +917,99 @@ a:focus:not(:focus-visible) {
 }
 
 .crew-list .crew-name {
-  font-size: 15px;
-  font-weight: 600;
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
-.crew-list .crew-speaking-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 3px 8px;
-  background: var(--accent-hot);
-  color: white;
-  border-radius: 999px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  animation: blink 1s ease-in-out infinite;
+.crew-list .crew-state {
+  font-size: 16px;
 }
 
-.crew-list .crew-you-badge {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 3px 8px;
+.crew-list .me {
+  border-color: var(--accent);
   background: var(--bg-elev-3);
-  color: var(--text-secondary);
-  border-radius: 999px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
-.crew-list .crew-empty {
-  background: transparent;
-  border: 1px dashed var(--border-subtle);
+.crew-empty {
+  text-align: center;
   color: var(--text-tertiary);
-  justify-content: center;
   font-size: 13px;
-  padding: 16px;
+  padding: 20px 12px;
+  background: transparent !important;
+  border-style: dashed !important;
 }
 
-/* ---------- Toast stack ---------- */
+/* ---------- Toasts ---------- */
 .toast-stack {
   position: fixed;
-  bottom: calc(20px + var(--safe-bottom));
-  left: 16px;
-  right: 16px;
+  top: calc(16px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   gap: 8px;
   pointer-events: none;
-  z-index: 100;
-  align-items: center;
+  max-width: 90%;
+  width: 360px;
 }
 
 .toast {
+  padding: 12px 16px;
   background: var(--bg-elev-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
   box-shadow: var(--shadow-deep);
-  max-width: 320px;
   text-align: center;
   pointer-events: auto;
-  animation: toastIn 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  animation: toastIn 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.toast.success { border-color: var(--accent-green); color: var(--accent-green); }
-.toast.error { border-color: var(--accent-hot); color: var(--accent-hot); }
-.toast.info { border-color: var(--accent); color: var(--accent); }
+.toast-error {
+  border-color: var(--accent-hot);
+  background: linear-gradient(135deg, var(--bg-elev-2), rgba(255, 82, 82, 0.18));
+  color: white;
+}
 
-.toast.fade-out {
-  animation: toastOut 240ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+.toast-success {
+  border-color: var(--accent-green);
+  background: linear-gradient(135deg, var(--bg-elev-2), rgba(76, 175, 80, 0.18));
+}
+
+.toast-leaving {
+  animation: toastOut 240ms ease-in forwards;
 }
 
 @keyframes toastIn {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from { opacity: 0; transform: translateY(-12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes toastOut {
-  from { transform: translateY(0); opacity: 1; }
-  to { transform: translateY(20px); opacity: 0; }
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(-12px); }
 }
 
-/* ---------- Mobile / small-screen tweaks ---------- */
-@media (max-height: 700px) {
-  .speaker-stage { min-height: 140px; padding: 16px; }
-  .ptt-button { width: 150px; height: 150px; }
-  .ptt-icon { font-size: 44px; }
-  .speaker-name { font-size: 24px; }
-  .speaker-pulse { width: 140px; height: 140px; }
+/* ---------- Responsive: bigger button on small screens ---------- */
+@media (max-width: 380px) {
+  .ptt-button {
+    height: 120px;
+  }
+  .ptt-icon { font-size: 48px; }
+  .ptt-label { font-size: 16px; }
+  .ptt-hint { font-size: 11px; }
 }
 
-@media (min-width: 768px) {
-  .container { padding: 32px 24px; }
-  .join-hero h1 { font-size: 40px; }
-  .role-grid { grid-template-columns: repeat(4, 1fr); }
+@media (min-width: 720px) {
+  .ptt-button {
+    height: 160px;
+    max-width: 360px;
+  }
+  .ptt-icon { font-size: 64px; }
+  .ptt-label { font-size: 20px; }
 }

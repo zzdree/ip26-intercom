@@ -13,24 +13,50 @@ Browser-based push-to-talk untuk **kru produksi event live** — camera op, swit
 
 ---
 
-## ⚡ Quick start (2 menit)
+## ⚡ Quick start (30 detik)
+
+**Cara paling gampang — one-click:**
+
+- **Windows**: double-click `start.bat`
+- **Mac / Linux**: double-click `start.sh` (atau `bash start.sh` dari terminal)
+
+Server otomatis nyala, terminal akan langsung nampilin IP address untuk kru.
+
+**Atau manual (kalau mau lihat proses detailnya):**
 
 ```bash
 # 1. Clone
-git clone https://github.com/yourname/ip26-intercom.git
+git clone https://github.com/zzdree/ip26-intercom.git
 cd ip26-intercom
 
-# 2. Install
+# 2. Install (cuma sekali)
 npm install
 
 # 3. Run server (di laptop / HP admin)
 npm start
 
-# 4. Lihat IP admin, misal 10.20.30.40
-# 5. Kru buka di HP: http://10.20.30.40:3000
+# 4. Lihat IP admin di terminal, misal 192.168.1.17
+# 5. Kru buka di HP: http://192.168.1.17:3000
 ```
 
-Server jalan di port 3000. Kru tinggal buka link, pilih role + nama, langsung bisa PTT. **No app install, no account, no internet.**
+Server jalan di port 3000. Kru tinggal buka link, pilih role + nama, langsung bisa bicara. **No app install, no account, no internet.**
+
+> **📡 Soal WiFi:** aplikasi ini jalan di WiFi lokal mana aja — WiFi kos, WiFi kampus (unnes-id), hotspot HP, atau WiFi venue. Server bind ke `0.0.0.0:3000`, jadi bisa diakses lewat IP mana aja yang aktif. Gak perlu "pilih WiFi" — yang penting kru nyambung ke WiFi yang sama dengan laptop server. Lihat `start.bat` output untuk lihat semua IP yang tersedia.
+
+---
+
+## 🎙️ Dua mode bicara
+
+Pilih mode yang sesuai gaya kerjamu — switch kapan aja:
+
+| Mode | Cara Pakai | Cocok Untuk |
+| --- | --- | --- |
+| 📻 **Push-to-Talk** (default) | **Tahan** tombol untuk bicara, lepas untuk selesai | Cue cepat, koordinasi singkat, one-shot message |
+| 🎙️ **Mute Toggle** | **Tap sekali** untuk mic ON, tap lagi untuk OFF | Ngobrol panjang, diskusi, presentasi, gosip ringan |
+
+Tap salah satu chip mode di atas tombol utama untuk ganti. Preferensi tersimpan otomatis per device.
+
+> **Visual cue:** Mode PTT = tombol **hijau emerald**. Mode Mute = tombol **amber/oranye**. Pas transmit, tombol jadi **lebih terang + glow ring + scale up 3%** — gampang kelihatan kalau lagi mic-on.
 
 ---
 
@@ -54,16 +80,17 @@ Saat event live, kru produksi tersebar di venue: camera di balcony, switcher di 
 
 ## ✨ Fitur
 
-- 🎙️ **Push-to-Talk** — tahan tombol, bicara, lepas. Audio half-duplex (satu orang bicara, semua dengar).
+- 🎙️ **2 mode bicara** — Push-to-Talk (tahan) atau Mute Toggle (tap on/off). Pilih yang cocok per situasi.
 - 👥 **Presence real-time** — lihat siapa aja yang online + role badge.
 - 🔊 **Speaker indicator** — langsung tahu siapa yang lagi ngomong.
 - 📱 **Mobile-first** — dioptimalkan untuk HP, tapi juga jalan di laptop.
 - 🔌 **Zero install** — browser only. Chrome, Safari, Edge, Firefox.
 - 🌐 **No internet required** — semua via WiFi lokal. TURN hanya fallback.
 - 🔁 **Auto-reconnect** — kalau WiFi drop sebentar, otomatis nyambung lagi.
-- 🔇 **Privacy by design** — mic disabled sampai PTT ditekan. Audio tidak lewat server.
+- 🔇 **Privacy by design** — mic disabled sampai PTT/Mute ditekan. Audio tidak lewat server.
 - 🎚️ **11 role preset** — CAM 1–4, Switcher, Produksi, ProPresenter 1–2, Audio FOH, Time Keeper, Lainnya.
 - ⚡ **Low latency** — P2P LAN typical < 50ms airtime. PTT → terdengar < 500ms.
+- 🚀 **One-click launcher** — `start.bat` (Windows) / `start.sh` (Unix) handle install + run otomatis.
 
 ---
 
@@ -79,7 +106,7 @@ Pertanyaan yang sering muncul: *"Kan bisa pake Discord, kenapa bikin sendiri?"*
 | 👤 Akun | Tidak perlu | Wajib, harus register, harus login |
 | 🔐 Privacy | Audio tidak lewat server, LAN only | Audio lewat Discord server (centralized) |
 | ⚡ Latency P2P LAN | < 50ms (host candidate) | 100–300ms (regional server) |
-| 🎙️ PTT semantic | Native, hold-to-talk | Push-to-Talk harus di-toggle manual, bukan default |
+| 🎙️ PTT semantic | Native, hold-to-talk (default) ATAU mute toggle | Push-to-Talk harus di-toggle manual, bukan default |
 | 🏷️ Role badge | Built-in (CAM 1, Switcher, dll) | Role ada, tapi tidak production-aware |
 | 📍 Discoverability | Lokal saja — kru harus sudah tahu | Bisa di-invite siapa aja dari mana aja |
 | 🎚️ Audio quality | Opus 32kbps, optimized for voice | Opus, variable quality |
@@ -98,103 +125,80 @@ Pertanyaan yang sering muncul: *"Kan bisa pake Discord, kenapa bikin sendiri?"*
 │                                                         │
 │  ┌──────────┐    WSS /ws    ┌─────────────────────┐    │
 │  │ Admin    │ ────────────► │  Node.js Signaling  │    │
-│  │ (server) │               │  Server (Express)   │    │
-│  └──────────┘               │  • presence         │    │
-│                              │  • SDP/ICE relay    │    │
-│                              │  • PTT broadcast    │    │
-│                              └──────────┬──────────┘    │
-│                                         │               │
-│                          signaling only, no audio       │
-│                                         │               │
-│       ┌──────────────┬──────────────────┴──┐            │
-│       ▼              ▼                     ▼            │
-│  ┌─────────┐   ┌─────────┐            ┌─────────┐      │
-│  │ HP Kru 1│◄─►│ HP Kru 2│◄──────────►│ HP Kru N│      │
-│  │ CAM 1   │   │ Switcher│            │ Audio   │      │
-│  └─────────┘   └─────────┘            └─────────┘      │
-│     WebRTC P2P mesh audio (Opus 32kbps)                │
+│  │ Laptop   │ ◄──────────── │  Server (port 3000) │    │
+│  └──────────┘    SDP/ICE    └─────────────────────┘    │
+│       │                            ▲                   │
+│       │ WebRTC (UDP, srflx)        │ presence          │
+│       ▼                            │                   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
+│  │ CAM 1    │  │ Switcher │  │ Audio FOH│             │
+│  │ (iPad)   │  │ (iPad)   │  │ (iPad)   │             │
+│  └──────────┘  └──────────┘  └──────────┘             │
+│  Full-mesh: setiap peer P2P langsung ke semua peer     │
 └─────────────────────────────────────────────────────────┘
 ```
 
-**Key idea:** signaling lewat WebSocket, audio langsung P2P antar HP. Server nggak pernah dengerin audio. TURN server hanya fallback kalau P2P diblok.
+**Kenapa arsitektur ini?**
 
-Detail lengkap? Lihat [DESIGN.md](DESIGN.md).
-
----
-
-## 🛠️ Tech stack
-
-- **Backend**: Node.js 18+, Express 4, `ws` (WebSocket)
-- **Frontend**: Vanilla JS, Vanilla CSS, no build step, no framework
-- **Audio**: WebRTC + Opus codec, `getUserMedia` untuk mic
-- **Signaling**: JSON over WebSocket (`/ws` endpoint)
-- **TURN**: `global.turn.metered.ca` (replace dengan credentials sendiri untuk production)
-
-Total dependencies: **2 packages**. `node_modules` size typical < 1 MB.
+- **Mesh, bukan SFU** — untuk ≤ 12 peer, mesh lebih sederhana dan latency-nya lebih rendah. Tidak butuh media server.
+- **WebSocket untuk signaling** — pertukaran SDP/ICE dan presence state. Cuma 1 endpoint HTTP yang perlu di-firewall.
+- **WebRTC untuk audio** — Opus codec, AGC/noise-cancel/echo-cancel built-in, native browser support.
+- **PTT di-track** — mic track di-disable sampai user trigger. Server tidak pernah tau audio (privacy by design).
 
 ---
 
-## 📂 Struktur
+## 📱 Tech Stack
 
-```
-ip26-intercom/
-├── server.js              # Express + ws signaling server
-├── package.json
-├── README.md              # ← you're here
-├── PRD.md                 # Product Requirements Document
-├── DESIGN.md              # Technical design
-├── LICENSE                # MIT
-├── .gitignore
-└── public/
-    ├── index.html         # Join page (pilih role + nama)
-    ├── join.js
-    ├── intercom.html      # Live PTT page
-    ├── intercom.js        # WebRTC + WebSocket client
-    └── style.css          # Mobile-first stylesheet
-```
+| Layer | Technology |
+| --- | --- |
+| Runtime | Node.js ≥ 18 |
+| Server | Express 4 (static + WebSocket) |
+| Signaling | `ws` 8 (WebSocket) |
+| Audio | WebRTC (Opus codec) |
+| Frontend | Vanilla JS + Vanilla CSS, no framework |
+| Build | **None** — no Webpack/Vite/babel, just open `index.html` |
+| Storage | `sessionStorage` only (no localStorage tracking) |
+
+**Total dependencies: 1 (express) + 1 (ws) = 2.**
 
 ---
 
-## 🧪 Testing cepat
+## 🎬 Use Case: UKK UNNES August 2026
 
-1. **Single-device test**: buka `http://localhost:3000` di Chrome, pilih role CAM 1, klik Join. Speaker stage show "Tidak ada yang bicara". PTT button bisa di-hold. (Tidak ada peer lain = tidak ada yang dengar, tapi UI harusnya responsive.)
-2. **Multi-device test**: di HP kedua (sama WiFi), buka link yang sama. Pilih role berbeda. Sekarang crew list show 2 kru. PTT di HP 1 → HP 2 dengar audio + lihat speaker indicator update.
-3. **Mic permission**: browser akan minta izin mic. Wajib di-allow, kalau deny tidak akan ada audio keluar.
-4. **Reconnect test**: matikan WiFi 5 detik, nyalakan lagi. Connection harus auto-recover tanpa refresh.
+Event akademik tahunan Universitas Negeri Semarang. Kru produksi:
 
-Detail testing lengkap di [DESIGN.md §10](DESIGN.md#10-testing).
+- 1× **Produksi** (stage manager)
+- 1× **Switcher** (vision mixer)
+- 4× **CAM 1–4** (camera ops)
+- 1× **ProPresenter 1** (lyrics operator)
+- 1× **ProPresenter 2** (slide operator)
+- 1× **Audio FOH** (sound engineer)
+- 1× **Time Keeper** (running order)
 
----
-
-## 🗺️ Roadmap
-
-Lihat [PRD.md §9](PRD.md#9-roadmap) untuk detail.
-
-- [x] **Phase 1 — MVP**: signaling + PTT + presence + mobile responsive
-- [ ] **Phase 2 — Polish**: desktop 2-column, QR code invite, better error messages
-- [ ] **Phase 3 — Production-grade**: persistent presence, speaker stats, channels
-- [ ] **Phase 4 — Scale**: SFU (mediasoup) untuk > 15 user, multi-server, push notif
+**Tanpa IP26 Intercom:** mereka teriak-teriakan atau lari ke switcher buat kasih cue. **Dengan IP26 Intercom:** satu tombol PTT di HP, cue "CAM 2 take 3" langsung terdengar semua kru.
 
 ---
 
-## 📜 Lisensi
+## 🛣️ Roadmap
 
-MIT — lihat [LICENSE](LICENSE).
+- [x] MVP: PTT + presence + role badge
+- [x] Mode selector: Push-to-Talk + Mute Toggle
+- [x] One-click launcher (start.bat / start.sh)
+- [ ] Group channels (bisa split jadi "team camera" dan "team audio")
+- [ ] Recording per event (opsional, default OFF, audio-only)
+- [ ] PWA (installable ke homescreen)
+- [ ] Federation (antar venue bisa bridge signaling)
 
-Bebas dipakai, dimodifikasi, di-distribute. Kalau mau kasih credit, link balik ke repo ini appreciated.
+---
+
+## 📄 Lisensi
+
+MIT — fork, modif, deploy sesuka hati.
 
 ---
 
 ## 🙏 Credits
 
-- Dibuat untuk **UKK UNNES** event produksi, Agustus 2026.
-- Terima kasih ke kru produksi yang sudah jadi guinea pig pertama. 🫡
-- WebRTC stack by Google / W3C. Signaling pakai [`ws`](https://github.com/websockets/ws) library. TURN by [Metered](https://www.metered.ca/).
-
----
-
-## 📚 Dokumentasi
-
-- 📋 [PRD.md](PRD.md) — apa & kenapa (product)
-- 🏗️ [DESIGN.md](DESIGN.md) — gimana caranya (technical)
-- 📦 [package.json](package.json) — dependencies & scripts
+- Yamaha QL Stage Mix — inspiration untuk kontrol mixer iPad via WiFi (tidak ada afiliasi)
+- WebRTC.org — untuk spec dan reference implementation
+- Tim produksi UKK UNNES — untuk use case yang valid
